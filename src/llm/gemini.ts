@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { LLMBase } from "./base";
 
 export function createGeminiClient({
@@ -24,21 +24,96 @@ export function createGeminiClient({
 
         protected async _invoke(prompt: string): Promise<string> {
             let currentHistory = [...this.state.history];
-            // Convert history to Gemini's expected format
-            const messages = currentHistory.map((msg) => {
+            
+            // Convert tools to Gemini function declarations
+            const functionDeclarations = this.tools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                parameters: {
+                    type: Type.OBJECT,
+                    properties: Object.entries(tool.parameters).reduce((acc, [key, value]) => {
+                        acc[key] = {
+                            type: value.type === "number" ? Type.NUMBER : Type.STRING,
+                            description: value.description,
+                        };
+                        return acc;
+                    }, {} as any),
+                    required: Object.keys(tool.parameters),
+                },
+            }));
+
+            const config = {
+                tools: [{
+                    functionDeclarations
+                }]
+            };
+
+            let contents: any[] = currentHistory.map((msg) => {
                 if (msg.role === "user") return { role: "user", parts: [{ text: msg.content }] };
                 if (msg.role === "assistant") return { role: "model", parts: [{ text: msg.content }] };
                 if (msg.role === "system") return { role: "system", parts: [{ text: msg.content }] };
-                if (msg.role === "tool") return { role: "function", parts: [{ functionResponse: { name: msg.tool_call_id, content: msg.content } }] };
                 return msg;
             });
-            const res = await ai.models.generateContent({
-                model: this.model,
-                contents: messages,
-            });
-            // Gemini does not yet support function calling in the same way as OpenAI, so this is a placeholder for future support
-            // If/when Gemini supports tool_calls, add similar logic as in openai.ts here
-            return res.text ?? "";
+
+            // Loop until no more function calls
+            while (true) {
+                const result = await ai.models.generateContent({
+                    model: this.model,
+                    contents,
+                    config,
+                });
+
+                if (result.functionCalls && result.functionCalls.length > 0) {
+                    // Execute all function calls
+                    for (const functionCall of result.functionCalls) {
+                        const tool = this.tools.find((t) => t.name === functionCall.name);
+                        if (!tool) throw new Error(`Tool not found: ${functionCall.name}`);
+                        
+                        const toolResponse = await tool.execute(functionCall.args || {});
+                        
+                        // Create function response part
+                        const functionResponsePart = {
+                            name: functionCall.name || "",
+                            response: { result: toolResponse }
+                        };
+
+                        // Add the model's response with function call
+                        contents.push({
+                            role: "model",
+                            parts: [{ functionCall } as any]
+                        });
+
+                        // Add the function response
+                        contents.push({
+                            role: "user",
+                            parts: [{ functionResponse: functionResponsePart } as any]
+                        });
+
+                        // Add to persistent state - only access text if no function calls
+                        const responseText = result.functionCalls.length === 0 ? (result.text || "") : "";
+                        this.state.history.push({
+                            role: "assistant" as const,
+                            content: responseText,
+                            tool_calls: [{
+                                id: functionCall.name || "",
+                                function: {
+                                    name: functionCall.name || "",
+                                    arguments: JSON.stringify(functionCall.args || {})
+                                }
+                            }]
+                        } as any);
+
+                        this.state.history.push({
+                            role: "tool" as const,
+                            tool_call_id: functionCall.name || "",
+                            content: toolResponse
+                        });
+                    }
+                } else {
+                    // No more function calls, return the final response
+                    return result.text || "";
+                }
+            }
         }
     })();
 }

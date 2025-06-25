@@ -125,7 +125,7 @@ main();
 ## Roadmap
 
 - [ ] Streaming support
-- [ ] Function calling for Claude and Gemini (when available)
+- [ * ] Function calling for Claude and Gemini (when available)
 - [ ] More advanced conversation memory
 
 ---
