@@ -3,17 +3,19 @@
   "version": "0.0.6", 
   "description": "The zero-boilerplate LLM framework for humans.",
   "main": "./dist/index.js",
-  "type": "module",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },
   "scripts": {
     "dev": "tsc -w --outDir dist",
-    "build": "tsc --outDir dist",
+    "build": "tsc --outDir dist && node fix-imports.js",
+    "postbuild": "node fix-imports.js",
     "clean": "rm -rf dist",
     "start": "node ./dist/index.js"
   },
