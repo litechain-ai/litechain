@@ -1,4 +1,4 @@
-import litechain from "../../index";
+import litechain from "litechain";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -52,7 +52,7 @@ const client = litechain.llm.gemini({
 });
 
 const main = async () => {
-
+    client.systemprompt = "You are a helpful assistant that can add, multiply, and get the current time.";
     const response = await client.invoke("multiply 4 with 5 and add the result with 342 and get the current time in human format?");
     console.log(JSON.stringify(client.state, null, 2));
     console.log(response);
