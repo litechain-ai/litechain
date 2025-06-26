@@ -40,12 +40,23 @@ class GeminiClient extends LLMBase {
             }]
         };
 
-        let contents: any[] = currentHistory.map((msg) => {
-            if (msg.role === "user") return { role: "user", parts: [{ text: msg.content }] };
-            if (msg.role === "assistant") return { role: "model", parts: [{ text: msg.content }] };
-            if (msg.role === "system") return { role: "system", parts: [{ text: msg.content }] };
-            return msg;
-        });
+        // Filter out system messages and convert to Gemini format
+        // For Gemini, we'll prepend system content to the first user message
+        let systemPrompt = "";
+        let contents: any[] = [];
+        
+        for (const msg of currentHistory) {
+            if (msg.role === "system") {
+                systemPrompt = msg.content;
+            } else if (msg.role === "user") {
+                const userContent = systemPrompt ? `${systemPrompt}\n\n${msg.content}` : msg.content;
+                contents.push({ role: "user", parts: [{ text: userContent }] });
+                systemPrompt = ""; // Only add system prompt to first user message
+            } else if (msg.role === "assistant") {
+                contents.push({ role: "model", parts: [{ text: msg.content }] });
+            }
+            // Skip tool messages for now - they're handled differently in function calling
+        }
 
         // Loop until no more function calls
         while (true) {
