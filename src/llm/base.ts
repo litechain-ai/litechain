@@ -52,7 +52,7 @@ export class LLMBase {
   /**
    * Handle transfer or escalation to connected LLM/function
    */
-  private async handleTransfer(message: string, target: string, type: 'transfer' | 'escalate'): Promise<string> {
+  protected async handleTransfer(message: string, target: string, type: 'transfer' | 'escalate'): Promise<string> {
     const connection = this.connections[target];
     
     if (!connection) {

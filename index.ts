@@ -1,15 +1,15 @@
-import { createOpenAIClient } from "./llm/openai";
-import { createGroqClient } from "./llm/groq";
-import { createGeminiClient } from "./llm/gemini";
-import { createClaudeClient } from "./llm/claude";
-import { LLMBase } from "./llm/base";
+import { createOpenAIClient } from "./src/llm/openai";
+import { createGroqClient } from "./src/llm/groq";
+import { createGeminiClient } from "./src/llm/gemini";
+import { createClaudeClient } from "./src/llm/claude";
+import { LLMBase } from "./src/llm/base";
 import { 
   ConnectionType, 
   ConnectionRoutes, 
   EnhancedLLMState, 
   TransferResponse, 
   ConversationFlowEntry 
-} from "./types/llm";
+} from "./src/types/llm";
 
 export default {
   llm: {
