@@ -1,6 +1,18 @@
 import { interpolatePrompt } from "../utils/prompt";
 import { v4 as uuidv4 } from "uuid";
 import { ConnectionRoutes, EnhancedLLMState, TransferResponse, ConversationFlowEntry } from "../types/llm";
+import { StreamChunk, StreamOptions, StreamResponse } from "../types/streaming";
+import { Memory, MemoryConfig, MemoryEntry } from "../types/memory";
+import { createMemory } from "../memory/factory";
+import { createStreamResponse, StreamManager } from "../utils/streaming";
+
+export interface RunOptions {
+  stream?: boolean;
+  onChunk?: (chunk: StreamChunk) => void;
+  onComplete?: (fullContent: string) => void;
+  onError?: (error: Error) => void;
+  variables?: Record<string, string>;
+}
 
 type LLMMessage =
   | { role: "user" | "assistant" | "system"; content: string }
@@ -23,8 +35,9 @@ export class LLMBase {
   public systemprompt: string = "";
   public tools: Tool[] = [];
   public connections: ConnectionRoutes = {};
+  public memory?: Memory;
 
-  constructor(public name: string, public model: string) {
+  constructor(public name: string, public model: string, memoryConfig?: MemoryConfig) {
     this.state = {
       thread_id: uuidv4(),
       history: [],
@@ -32,10 +45,28 @@ export class LLMBase {
       transfers: [],
       current_llm: this.name,
     };
+    
+    // Initialize memory if configured
+    if (memoryConfig) {
+      this.memory = createMemory(memoryConfig, this.state.thread_id);
+    }
   }
 
   protected async _invoke(prompt: string): Promise<string> {
     throw new Error("Method not implemented");
+  }
+
+  protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+    // Default implementation: fallback to non-streaming
+    const response = await this._invoke(prompt);
+    const manager = new StreamManager();
+    
+    async function* fallbackStream() {
+      yield manager.processChunk(response);
+      yield manager.complete();
+    }
+    
+    return fallbackStream();
   }
 
   addTool(tool: Tool) {
@@ -107,27 +138,100 @@ export class LLMBase {
    * Enhanced invoke method with chaining capabilities
    */
   async invoke(message: string, variables: Record<string, string> = {}): Promise<string> {
+    return this.run(message, { variables });
+  }
+
+  /**
+   * Main run method with streaming and memory support
+   */
+  async run(message: string, options: RunOptions = {}): Promise<string> {
+    const { variables = {}, stream = false } = options;
+    
+    // Load memory context if available
+    let memoryContext = '';
+    if (this.memory) {
+      const memoryEntries = await this.memory.retrieve(message, 5);
+      if (memoryEntries.length > 0) {
+        memoryContext = memoryEntries
+          .map(entry => `[${entry.timestamp.toLocaleString()}] ${entry.content}`)
+          .join('\n');
+      }
+    }
+
     const finalSystem = interpolatePrompt(this.systemprompt, variables);
     const userPrompt = interpolatePrompt(message, variables);
+    
+    // Prepare the full prompt with memory context
+    const fullPrompt = memoryContext 
+      ? `Context from memory:\n${memoryContext}\n\nUser: ${userPrompt}`
+      : userPrompt;
 
     if (this.state.history.length === 0 && this.systemprompt) {
       this.state.history.push({ role: "system", content: finalSystem });
     }
 
-    this.state.history.push({ role: "user", content: userPrompt });
+    this.state.history.push({ role: "user", content: fullPrompt });
 
-    // Get initial response from this LLM
-    let response = await this._invoke(userPrompt);
+    let response: string;
+    
+    if (stream) {
+      // Handle streaming
+      const streamIterator = await this._invokeStream(fullPrompt);
+      let fullContent = '';
+      
+      for await (const chunk of streamIterator) {
+        if (options.onChunk) {
+          options.onChunk(chunk);
+        }
+        fullContent = chunk.content;
+        
+        if (chunk.isComplete) {
+          break;
+        }
+      }
+      
+      response = fullContent;
+      
+      if (options.onComplete) {
+        options.onComplete(response);
+      }
+    } else {
+      // Handle non-streaming
+      response = await this._invoke(fullPrompt);
+    }
+
     this.state.history.push({ role: "assistant", content: response });
 
-    // Record initial conversation flow entry
-    const initialFlowEntry: ConversationFlowEntry = {
+    // Store in memory if available
+    if (this.memory) {
+      const userEntry: MemoryEntry = {
+        id: uuidv4(),
+        content: userPrompt,
+        timestamp: new Date(),
+        metadata: { role: 'user', llm: this.name }
+      };
+      
+      const assistantEntry: MemoryEntry = {
+        id: uuidv4(),
+        content: response,
+        timestamp: new Date(),
+        metadata: { role: 'assistant', llm: this.name }
+      };
+      
+      await Promise.all([
+        this.memory.store(userEntry),
+        this.memory.store(assistantEntry)
+      ]);
+    }
+
+    // Record conversation flow entry
+    const flowEntry: ConversationFlowEntry = {
       llmName: this.name,
       message: userPrompt,
       response,
       timestamp: new Date()
     };
-    this.state.conversation_flow.push(initialFlowEntry);
+    this.state.conversation_flow.push(flowEntry);
 
     // Check for transfer patterns
     const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
@@ -142,6 +246,25 @@ export class LLMBase {
     }
 
     return response;
+  }
+
+  /**
+   * Create a streaming response
+   */
+  async stream(message: string, options: StreamOptions = {}): Promise<StreamResponse> {
+    const streamOptions: RunOptions = {
+      ...options,
+      stream: true
+    };
+
+    const streamPromise = this._createStreamPromise(message, streamOptions);
+    return createStreamResponse(streamPromise, options);
+  }
+
+  private async _createStreamPromise(message: string, options: RunOptions): Promise<AsyncIterableIterator<StreamChunk>> {
+    // This is a simplified version - in practice you'd want to handle memory/context here too
+    const finalPrompt = interpolatePrompt(message, options.variables || {});
+    return this._invokeStream(finalPrompt);
   }
 
   /**
