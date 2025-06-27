@@ -134,6 +134,8 @@ entryLLM.connect({ TECH: techLLM });
 - ⚡ **Simple Integration:** Just one import—no need to import types or utilities separately.
 - 🧩 **Extensible:** Add as many tools as you want, with custom parameters and logic.
 - 📊 **State Tracking:** Built-in conversation flow and transfer history for debugging and transparency.
+- 💰 **Budget Tracking:** Monitor token usage and costs across all LLM calls with automatic limit enforcement.
+- 🔍 **Custom Embeddings:** Use OpenAI, Cohere, HuggingFace, or your own embedding functions for enhanced vector memory.
 
 ---
 
@@ -156,11 +158,21 @@ import litechain from "litechain"; // One line import
 
 const llm = litechain.llm.openai({ // Yes, that's simple
   apiKey: process.env.OPENAI_API_KEY!,
-  model: "gpt-4o-mini"
+  model: "gpt-4o-mini",
+  budget: { limit: 10 }, // $10 budget limit
+  memory: 'vector', // Vector memory for context
+  embeddings: { // Custom embeddings for better search
+    provider: 'openai',
+    apiKey: process.env.OPENAI_API_KEY!
+  }
 });
 
 // Use invoke for standard responses  
 const response = await llm.invoke("Hello!");
+
+// Check budget usage
+const usage = llm.getUsage();
+console.log(`Cost: $${usage.cost.totalCost.toFixed(4)}`);
 
 // Use run for streaming and advanced options
 await llm.run("Write a story", {
@@ -886,6 +898,259 @@ await Promise.all(promises);
 
 ---
 
+## Budget Tracking
+
+Litechain includes **built-in budget tracking** to monitor token usage and costs across all LLM calls:
+
+### Basic Budget Setup
+
+```ts
+import litechain from "litechain";
+
+const llm = litechain.llm.openai({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "gpt-4o-mini",
+  budget: {
+    limit: 10, // $10 USD limit
+    onExceeded: (usage) => {
+      console.log("Budget exceeded!", usage);
+    }
+  }
+});
+
+// Use normally - budget is tracked automatically
+const response = await llm.invoke("Hello!");
+
+// Check current usage
+const usage = llm.getUsage();
+console.log({
+  tokens: usage.tokens.totalTokens,
+  cost: usage.cost.totalCost // In USD
+});
+```
+
+### Advanced Budget Features
+
+```ts
+// Detailed budget configuration
+const llm = litechain.llm.openai({
+  apiKey: "...",
+  model: "gpt-4o-mini",
+  budget: {
+    limit: 50,
+    trackTokens: true,
+    onExceeded: (usage) => {
+      // Custom handler - log, send alert, etc.
+      console.log(`Budget exceeded: $${usage.cost.totalCost}`);
+      // Optionally stop execution or switch to cheaper model
+    }
+  }
+});
+
+// Get detailed report
+console.log(llm.getBudgetReport());
+// Output:
+// Budget Usage Report:
+// - Tokens: 1,250 (800 input, 450 output)
+// - Cost: $0.0045 ($0.0024 input, $0.0021 output)
+// - Remaining: $49.9955
+// - Status: OK
+
+// Check if budget exceeded
+if (llm.isBudgetExceeded()) {
+  console.log("Switch to cheaper model or stop");
+}
+
+// Reset budget for new session
+llm.resetBudget();
+
+// Update budget limits dynamically
+llm.updateBudgetConfig({ limit: 100 });
+```
+
+### Budget Tracking Across Providers
+
+```ts
+// All providers support budget tracking
+const openai = litechain.llm.openai({ 
+  apiKey: "...", 
+  model: "gpt-4o-mini",
+  budget: { limit: 10 }
+});
+
+const gemini = litechain.llm.gemini({ 
+  apiKey: "...", 
+  model: "gemini-2.0-flash",
+  budget: { limit: 10 }
+});
+
+const claude = litechain.llm.claude({ 
+  apiKey: "...", 
+  model: "claude-3-haiku",
+  budget: { limit: 10 }
+});
+
+// Compare costs across providers
+const prompt = "Explain quantum computing";
+const [openaiResponse, geminiResponse, claudeResponse] = await Promise.all([
+  openai.invoke(prompt),
+  gemini.invoke(prompt),
+  claude.invoke(prompt)
+]);
+
+console.log("Cost comparison:");
+console.log("OpenAI:", openai.getUsage().cost.totalCost);
+console.log("Gemini:", gemini.getUsage().cost.totalCost);
+console.log("Claude:", claude.getUsage().cost.totalCost);
+```
+
+### Streaming with Budget Tracking
+
+```ts
+await llm.run("Write a long essay", {
+  stream: true,
+  onChunk: (chunk) => {
+    process.stdout.write(chunk.delta);
+  },
+  onComplete: (content) => {
+    // Budget is automatically tracked during streaming
+    const usage = llm.getUsage();
+    console.log(`\nCost: $${usage.cost.totalCost.toFixed(4)}`);
+  }
+});
+```
+
+---
+
+## Custom Embedding Providers
+
+Litechain supports **custom embedding providers** for enhanced vector memory and semantic search:
+
+### Built-in Providers
+
+```ts
+// OpenAI Embeddings
+const llm = litechain.llm.openai({
+  apiKey: "...",
+  model: "gpt-4o-mini",
+  memory: 'vector',
+  embeddings: {
+    provider: 'openai',
+    apiKey: process.env.OPENAI_API_KEY!,
+    model: 'text-embedding-3-small' // Optional, defaults to text-embedding-3-small
+  }
+});
+
+// Cohere Embeddings
+const llm2 = litechain.llm.gemini({
+  apiKey: "...",
+  model: "gemini-2.0-flash",
+  memory: 'vector',
+  embeddings: {
+    provider: 'cohere',
+    apiKey: process.env.COHERE_API_KEY!,
+    model: 'embed-english-v3.0' // Optional
+  }
+});
+
+// HuggingFace Embeddings
+const llm3 = litechain.llm.claude({
+  apiKey: "...",
+  model: "claude-3-haiku",
+  memory: 'vector',
+  embeddings: {
+    provider: 'huggingface',
+    apiKey: process.env.HUGGINGFACE_API_KEY, // Optional for public models
+    model: 'sentence-transformers/all-MiniLM-L6-v2' // Optional
+  }
+});
+```
+
+### Custom Embedding Functions
+
+```ts
+// Define your own embedding function
+const customEmbedding = async (texts: string[]) => {
+  // Your custom logic here
+  // Return array of embedding vectors (number arrays)
+  return texts.map(text => {
+    // Example: simple character-based embedding
+    const embedding = new Array(384).fill(0);
+    for (let i = 0; i < text.length && i < embedding.length; i++) {
+      embedding[i] = text.charCodeAt(i) / 1000;
+    }
+    
+    // Normalize the vector
+    const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+    return embedding.map(val => norm > 0 ? val / norm : 0);
+  });
+};
+
+const llm = litechain.llm.openai({
+  apiKey: "...",
+  model: "gpt-4o-mini",
+  memory: 'vector',
+  embeddings: customEmbedding // Use custom function
+});
+```
+
+### Enhanced Vector Memory
+
+```ts
+// Enhanced vector memory with semantic search
+const llm = litechain.llm.openai({
+  apiKey: "...",
+  model: "gpt-4o-mini",
+  memory: 'vector',
+  embeddings: {
+    provider: 'openai',
+    apiKey: process.env.OPENAI_API_KEY!
+  }
+});
+
+await llm.invoke("I love programming in TypeScript");
+await llm.invoke("My favorite framework is React");
+await llm.invoke("I enjoy building AI applications");
+
+// Semantic query - will find relevant context
+const response = await llm.invoke("What programming language do I like?");
+// Response will include context about TypeScript preference
+```
+
+### Embedding Provider Configuration
+
+```ts
+// OpenAI with specific model
+embeddings: {
+  provider: 'openai',
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: 'text-embedding-3-large' // Higher quality, more expensive
+}
+
+// Cohere with multilingual support
+embeddings: {
+  provider: 'cohere',
+  apiKey: process.env.COHERE_API_KEY!,
+  model: 'embed-multilingual-v3.0'
+}
+
+// HuggingFace with custom endpoint
+embeddings: {
+  provider: 'huggingface',
+  apiKey: process.env.HUGGINGFACE_API_KEY,
+  model: 'sentence-transformers/all-mpnet-base-v2',
+  endpoint: 'https://your-custom-endpoint.com/embeddings'
+}
+
+// Local embeddings (requires local setup)
+embeddings: {
+  provider: 'local',
+  model: 'sentence-transformers/all-MiniLM-L6-v2'
+}
+```
+
+---
+
 ## Memory & Persistent Storage
 
 Litechain provides **built-in memory management** with multiple storage backends:
@@ -1047,8 +1312,8 @@ const responses = await Promise.all([
 - [x] **Vector memory** ✅ Available now
 - [x] **State management** ✅ Available now
 - [x] Function calling for Claude and Gemini ✅ Available now
-- [ ] Budget tracking
-- [ ] Custom embedding providers
+- [x] **Budget tracking** ✅ Available now
+- [x] **Custom embedding providers** ✅ Available now
 
 ---
 

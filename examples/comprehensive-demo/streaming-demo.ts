@@ -37,19 +37,20 @@ async function demonstrateStreaming() {
   console.log('   '); // Starting position for streaming text
   
   try {
-    const response = await llm.run(prompt, {
+    await llm.run(prompt, {
       stream: true,
       onChunk: (chunk) => {
-        process.stdout.write(chunk.delta);
-        fullContent += chunk.delta;
-        chunkCount++;
-        
-        if (chunk.isComplete) {
-          console.log('\n');
-          DemoLogger.info(`Streaming completed: ${chunkCount} chunks, ${fullContent.length} characters`);
+        // Only write the delta (new tokens) to avoid duplicates
+        if (chunk.delta) {
+          process.stdout.write(chunk.delta);
+          chunkCount++;
         }
       },
       onComplete: (content) => {
+        console.log('\n');
+        DemoLogger.info(`✅ Streaming completed: ${chunkCount} chunks, ${content.length} characters`);
+        DemoLogger.info(`📊 Average chunk size: ${(content.length / chunkCount).toFixed(2)} characters`);
+        fullContent = content;
         DemoLogger.success("Story generation completed!");
       },
       onError: (error) => {
@@ -79,13 +80,17 @@ async function demonstrateStreaming() {
     await llm.run(longPrompt, {
       stream: true,
       onChunk: (chunk) => {
-        // Estimate progress based on typical response length
-        estimatedProgress = Math.min(99, estimatedProgress + Math.random() * 3);
-        progressBar.update(Math.floor(estimatedProgress), 'Generating response...');
-        
-        if (chunk.isComplete) {
-          progressBar.update(100, 'Complete!');
+        // Only process actual token deltas
+        if (chunk.delta) {
+          // Estimate progress based on chunk count
+          estimatedProgress = Math.min(99, estimatedProgress + 1);
+          progressBar.update(Math.floor(estimatedProgress), 'Generating response...');
         }
+      },
+      onComplete: (content) => {
+        progressBar.update(100, 'Complete!');
+        console.log('\n');
+        DemoLogger.response(content);
       }
     });
   } catch (error) {
