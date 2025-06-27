@@ -1,11 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { LLMBase } from "./base";
+import { LLMBase, LLMConfig } from "./base";
 
 class GeminiClient extends LLMBase {
     private ai: GoogleGenAI;
 
-    constructor(apiKey: string, model: string, tools?: any[]) {
-        super("gemini", model);
+    constructor(apiKey: string, model: string, tools?: any[], config?: LLMConfig) {
+        super("gemini", model, config);
         this.ai = new GoogleGenAI({ apiKey });
         if (tools) {
             tools.forEach((tool) => {
@@ -114,7 +114,22 @@ class GeminiClient extends LLMBase {
                 }
             } else {
                 // No more function calls, return the final response
-                return result.text || "";
+                const finalResponse = result.text || "";
+                
+                // Record token usage for budget tracking (Gemini doesn't provide exact token counts)
+                if (this.budgetTracker) {
+                    // Estimate token usage based on text length
+                    const inputTokens = Math.ceil(JSON.stringify(contents).length / 4);
+                    const outputTokens = Math.ceil(finalResponse.length / 4);
+                    
+                    this.recordTokenUsage({
+                        inputTokens,
+                        outputTokens,
+                        totalTokens: inputTokens + outputTokens
+                    });
+                }
+                
+                return finalResponse;
             }
         }
     }
@@ -124,10 +139,12 @@ export function createGeminiClient({
     apiKey,
     model,
     tools,
+    config,
 }: {
     apiKey: string;
     model: string;
     tools?: any[];
+    config?: LLMConfig;
 }) {
-    return new GeminiClient(apiKey, model, tools);
+    return new GeminiClient(apiKey, model, tools, config);
 }

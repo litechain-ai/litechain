@@ -1022,306 +1022,51 @@ await llm.run("Write a long essay", {
 
 ---
 
-## Custom Embedding Providers
+## ✨ New Enhanced Features
 
-Litechain supports **custom embedding providers** for enhanced vector memory and semantic search:
+### 💰 **Budget Tracking**
 
-### Built-in Providers
-
-```ts
-// OpenAI Embeddings
-const llm = litechain.llm.openai({
-  apiKey: "...",
-  model: "gpt-4o-mini",
-  memory: 'vector',
-  embeddings: {
-    provider: 'openai',
-    apiKey: process.env.OPENAI_API_KEY!,
-    model: 'text-embedding-3-small' // Optional, defaults to text-embedding-3-small
-  }
-});
-
-// Cohere Embeddings
-const llm2 = litechain.llm.gemini({
-  apiKey: "...",
-  model: "gemini-2.0-flash",
-  memory: 'vector',
-  embeddings: {
-    provider: 'cohere',
-    apiKey: process.env.COHERE_API_KEY!,
-    model: 'embed-english-v3.0' // Optional
-  }
-});
-
-// HuggingFace Embeddings
-const llm3 = litechain.llm.claude({
-  apiKey: "...",
-  model: "claude-3-haiku",
-  memory: 'vector',
-  embeddings: {
-    provider: 'huggingface',
-    apiKey: process.env.HUGGINGFACE_API_KEY, // Optional for public models
-    model: 'sentence-transformers/all-MiniLM-L6-v2' // Optional
-  }
-});
-```
-
-### Custom Embedding Functions
+Track token usage and costs automatically with built-in budget limits:
 
 ```ts
-// Define your own embedding function
-const customEmbedding = async (texts: string[]) => {
-  // Your custom logic here
-  // Return array of embedding vectors (number arrays)
-  return texts.map(text => {
-    // Example: simple character-based embedding
-    const embedding = new Array(384).fill(0);
-    for (let i = 0; i < text.length && i < embedding.length; i++) {
-      embedding[i] = text.charCodeAt(i) / 1000;
-    }
-    
-    // Normalize the vector
-    const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-    return embedding.map(val => norm > 0 ? val / norm : 0);
-  });
-};
-
-const llm = litechain.llm.openai({
-  apiKey: "...",
-  model: "gpt-4o-mini",
-  memory: 'vector',
-  embeddings: customEmbedding // Use custom function
-});
-```
-
-### Enhanced Vector Memory
-
-```ts
-// Enhanced vector memory with semantic search
-const llm = litechain.llm.openai({
-  apiKey: "...",
-  model: "gpt-4o-mini",
-  memory: 'vector',
-  embeddings: {
-    provider: 'openai',
-    apiKey: process.env.OPENAI_API_KEY!
-  }
-});
-
-await llm.invoke("I love programming in TypeScript");
-await llm.invoke("My favorite framework is React");
-await llm.invoke("I enjoy building AI applications");
-
-// Semantic query - will find relevant context
-const response = await llm.invoke("What programming language do I like?");
-// Response will include context about TypeScript preference
-```
-
-### Embedding Provider Configuration
-
-```ts
-// OpenAI with specific model
-embeddings: {
+const chain = litechain({
   provider: 'openai',
-  apiKey: process.env.OPENAI_API_KEY!,
-  model: 'text-embedding-3-large' // Higher quality, more expensive
-}
-
-// Cohere with multilingual support
-embeddings: {
-  provider: 'cohere',
-  apiKey: process.env.COHERE_API_KEY!,
-  model: 'embed-multilingual-v3.0'
-}
-
-// HuggingFace with custom endpoint
-embeddings: {
-  provider: 'huggingface',
-  apiKey: process.env.HUGGINGFACE_API_KEY,
-  model: 'sentence-transformers/all-mpnet-base-v2',
-  endpoint: 'https://your-custom-endpoint.com/embeddings'
-}
-
-// Local embeddings (requires local setup)
-embeddings: {
-  provider: 'local',
-  model: 'sentence-transformers/all-MiniLM-L6-v2'
-}
-```
-
----
-
-## Memory & Persistent Storage
-
-Litechain provides **built-in memory management** with multiple storage backends:
-
-### Automatic Memory (Default)
-```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
-
-// Automatic conversation memory - no setup needed
-await llm.invoke("My name is John");
-await llm.invoke("What's my name?"); // Remembers "John"
-
-// Access conversation state
-console.log("History:", llm.state.history.length);
-console.log("Thread ID:", llm.state.thread_id);
-```
-
-### File-based Persistent Memory
-```ts
-import { createMemory } from "litechain";
-
-// File-based memory that persists across sessions
-const memory = createMemory({
-  type: 'file',
-  path: './memory/conversations'
+  model: "gpt-4o",
+  apiKey: "sk-...",
+  budget: {
+    limit: 10, // USD
+    onExceeded: () => console.log("Limit exceeded")
+  }
 });
 
-const llm = litechain.llm.openai({ 
-  apiKey: "...", 
-  model: "gpt-4",
-  memory: memory // Persistent across restarts
-});
+const response = await chain.invoke("Hello!");
+const usage = chain.getUsage();
+// => { tokens: 5000, cost: 0.75, calls: 1, inputTokens: 2000, outputTokens: 3000 }
 ```
 
-### Vector Memory for Semantic Search
-```ts
-// Vector memory for semantic similarity
-const vectorMemory = createMemory('vector');
+### 🎯 **Custom Embedding Providers**
 
-const llm = litechain.llm.openai({ 
-  apiKey: "...", 
-  model: "gpt-4",
-  memory: vectorMemory
-});
-
-// Automatically creates embeddings for semantic retrieval
-await llm.invoke("I love machine learning");
-await llm.invoke("Tell me about AI"); // Finds semantically similar context
-```
-
-### Memory Configuration Options
-```ts
-// Chat memory with custom limits
-const chatMemory = createMemory({
-  type: 'file',
-  path: './conversations',
-  maxMessages: 50
-});
-
-// Hybrid memory (combines chat + vector)
-const hybridMemory = new HybridMemory({
-  chatConfig: { type: 'file', path: './chat' },
-  vectorConfig: { type: 'local' }
-});
-```
-
----
-
-## Advanced State Management
-
-### Conversation Flow Tracking
-```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
-
-await llm.invoke("Calculate 5 * 10");
-await llm.invoke("Add 25 to that result");
-
-// Get detailed conversation flow
-const flow = llm.getConversationFlow();
-flow.forEach(entry => {
-  console.log(`[${entry.timestamp}] ${entry.llmName}: ${entry.response}`);
-});
-
-// Get transfer history (for chained LLMs)
-const transfers = llm.getTransferHistory();
-console.log("Transfers:", transfers.length);
-```
-
-### State Inspection & Debugging
-```ts
-// Access complete state information
-const state = llm.state;
-console.log({
-  threadId: state.thread_id,
-  historyLength: state.history.length,
-  conversationFlow: state.conversation_flow.length,
-  transfers: state.transfers.length,
-  currentLLM: state.current_llm
-});
-
-// Clear state for fresh conversation
-llm.clearState();
-```
-
----
-
-## Variable Interpolation
-
-Litechain supports **dynamic variable substitution** in system prompts:
+Use built-in providers or custom embedding functions:
 
 ```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
-
-// Template variables in system prompt
-llm.systemprompt = "You are a {role} assistant helping with {task}. Be {tone} in your responses.";
-
-// Variables are replaced during invocation
-const response = await llm.invoke("Help me get started", {
-  role: "friendly coding",
-  task: "JavaScript development",
-  tone: "encouraging and detailed"
-});
-```
-
----
-
-## Multi-Provider Examples
-
-### Seamless Provider Switching
-```ts
-// Same interface across all providers
-const openaiLLM = litechain.llm.openai({ apiKey: "...", model: "gpt-4o-mini" });
-const geminiLLM = litechain.llm.gemini({ apiKey: "...", model: "gemini-2.0-flash" });
-const claudeLLM = litechain.llm.claude({ apiKey: "...", model: "claude-3-haiku" });
-const groqLLM = litechain.llm.groq({ apiKey: "...", model: "llama-3.1-8b-instant" });
-
-// All support same features: tools, streaming, chaining, memory
-[openaiLLM, geminiLLM, claudeLLM, groqLLM].forEach(llm => {
-  llm.systemprompt = "You are a helpful assistant";
-  llm.addTool(myTool);
+// Built-in provider
+const chain = litechain({
+  model: "gpt-4o",
+  apiKey: "sk-...",
+  embeddings: {
+    provider: "cohere",
+    apiKey: "...",
+    model: "embed-v3"
+  }
 });
 
-// Compare responses across providers
-const prompt = "Explain quantum computing";
-const responses = await Promise.all([
-  openaiLLM.invoke(prompt),
-  geminiLLM.invoke(prompt),
-  claudeLLM.invoke(prompt),
-  groqLLM.invoke(prompt)
-]);
+// Custom embedding function
+const chain = litechain({
+  model: "gpt-4o", 
+  apiKey: "sk-...",
+  embeddings: async (text) => {
+    // Your custom embedding logic
+    return [0.1, 0.2, 0.3]; // Return vector
+  }
+});
 ```
-
----
-
-## Roadmap
-
-- [x] **Streaming support** ✅ Available now
-- [x] **File-based memory** ✅ Available now  
-- [x] **Vector memory** ✅ Available now
-- [x] **State management** ✅ Available now
-- [x] Function calling for Claude and Gemini ✅ Available now
-- [x] **Budget tracking** ✅ Available now
-- [x] **Custom embedding providers** ✅ Available now
-
----
-
-## License
-
-MIT
-
----
-
-**Litechain** makes LLM tool/function calling and chaining easy and extensible.  
-PRs and feedback welcome! 

@@ -1,11 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { LLMBase } from "./base";
+import { LLMBase, LLMConfig } from "./base";
 
 class ClaudeClient extends LLMBase {
     private anthropic: Anthropic;
 
-    constructor(apiKey: string, model: string, tools?: any[]) {
-        super("claude", model);
+    constructor(apiKey: string, model: string, tools?: any[], config?: LLMConfig) {
+        super("claude", model, config);
         this.anthropic = new Anthropic({ apiKey });
         if (tools) {
             tools.forEach((tool) => {
@@ -29,6 +29,16 @@ class ClaudeClient extends LLMBase {
         const text = Array.isArray(res.content)
             ? res.content.map((block: any) => typeof block.text === "string" ? block.text : "").join("")
             : "";
+            
+        // Record token usage for budget tracking
+        if (res.usage && this.budgetTracker) {
+            this.recordTokenUsage({
+                inputTokens: res.usage.input_tokens,
+                outputTokens: res.usage.output_tokens,
+                totalTokens: res.usage.input_tokens + res.usage.output_tokens
+            });
+        }
+        
         return text;
     }
 }
@@ -37,10 +47,12 @@ export function createClaudeClient({
     apiKey,
     model,
     tools,
+    config,
 }: {
     apiKey: string;
     model: string;
     tools?: any[];
+    config?: LLMConfig;
 }) {
-    return new ClaudeClient(apiKey, model, tools);
+    return new ClaudeClient(apiKey, model, tools, config);
 }

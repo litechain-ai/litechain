@@ -7,6 +7,7 @@
 
 import litechain from "../../dist/index.js";
 import { DemoLogger } from "./utils/demo-helpers.ts";
+import { runDemo as runBudgetEmbeddingsDemo } from "./budget-embeddings-demo.ts";
 
 // Simple demo without external dependencies
 async function simpleLitechainDemo() {
@@ -177,6 +178,9 @@ function showDemoMenu() {
      npm run demo:chaining   # LLM chaining and routing
      npm run demo:memory     # Memory and state management  
      npm run demo:streaming  # Streaming responses
+     npm run demo:budget     # Budget tracking & embeddings
+     
+  📁 Advanced Features:
      npm run demo:tools      # Advanced tool usage
   
   🎭 Complete Experience:

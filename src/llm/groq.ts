@@ -1,11 +1,11 @@
 import Groq from "groq-sdk";
-import { LLMBase } from "./base";
+import { LLMBase, LLMConfig } from "./base";
 
 class GroqClient extends LLMBase {
     private groq: Groq;
 
-    constructor(apiKey: string, model: string, tools?: any[]) {
-        super("groq", model);
+    constructor(apiKey: string, model: string, tools?: any[], config?: LLMConfig) {
+        super("groq", model, config);
         this.groq = new Groq({ apiKey });
         if (tools) {
             tools.forEach((tool) => {
@@ -63,7 +63,19 @@ class GroqClient extends LLMBase {
                 messages: currentHistory,
             });
         }
-        return res.choices[0].message.content || "";
+        
+        const finalResponse = res.choices[0].message.content || "";
+        
+        // Record token usage for budget tracking
+        if (res.usage && this.budgetTracker) {
+            this.recordTokenUsage({
+                inputTokens: res.usage.prompt_tokens,
+                outputTokens: res.usage.completion_tokens,
+                totalTokens: res.usage.total_tokens
+            });
+        }
+        
+        return finalResponse;
     }
 }
 
@@ -71,10 +83,12 @@ export function createGroqClient({
     apiKey,
     model,
     tools,
+    config,
 }: {
     apiKey: string;
     model: string;
     tools?: any[];
+    config?: LLMConfig;
 }) {
-    return new GroqClient(apiKey, model, tools);
+    return new GroqClient(apiKey, model, tools, config);
 }

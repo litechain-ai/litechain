@@ -4,7 +4,14 @@
   "main": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "ts-node index.ts"
+    "dev": "ts-node index.ts",
+    "demo:basic": "ts-node basic-usage.ts",
+    "demo:chaining": "ts-node llm-chaining.ts", 
+    "demo:memory": "ts-node memory-demo.ts",
+    "demo:streaming": "ts-node streaming-demo.ts",
+    "demo:budget": "ts-node budget-embeddings-demo.ts",
+    "demo:advanced": "ts-node advanced-tools.ts",
+    "demo:all": "ts-node comprehensive-demo.ts"
   },
   "keywords": [],
   "author": "",
