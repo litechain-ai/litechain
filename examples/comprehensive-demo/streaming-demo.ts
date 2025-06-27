@@ -20,12 +20,16 @@ async function demonstrateStreaming() {
   // 1. Basic Streaming Demo
   DemoLogger.step("Basic streaming with chunk handling");
   
-  const llm = litechain.llm.openai({
-    apiKey: process.env.OPENAI_API_KEY!,
-    model: "gpt-4o-mini"
+  const llm = litechain({
+    provider: 'claude',
+    apiKey: process.env.ANTHROPIC_API_KEY!,
+    model: "claude-3-5-sonnet-20241022",
+    budget: {
+      trackTokens: true,
+      trackCost: true
+    },
+    systemPrompt: "You are a creative storyteller. Write engaging, detailed responses."
   });
-
-  llm.systemprompt = "You are a creative storyteller. Write engaging, detailed responses.";
 
   const prompt = "Write a short story about a robot discovering emotions for the first time.";
   DemoLogger.user(prompt);
@@ -49,6 +53,14 @@ async function demonstrateStreaming() {
       onComplete: (content) => {
         console.log('\n');
         DemoLogger.info(`✅ Streaming completed: ${chunkCount} chunks, ${content.length} characters`);
+        
+        // Show usage statistics
+        const usage = llm.getUsage();
+        if (usage) {
+          DemoLogger.info(`📊 Token usage: ${usage.inputTokens} input + ${usage.outputTokens} output = ${usage.tokens} total`);
+          DemoLogger.info(`💰 Estimated cost: $${usage.cost.toFixed(4)}`);
+        }
+        
         DemoLogger.info(`📊 Average chunk size: ${(content.length / chunkCount).toFixed(2)} characters`);
         fullContent = content;
         DemoLogger.success("Story generation completed!");
@@ -91,6 +103,13 @@ async function demonstrateStreaming() {
         progressBar.update(100, 'Complete!');
         console.log('\n');
         DemoLogger.response(content);
+        
+        // Show usage statistics for Claude
+        const usage = llm.getUsage();
+        if (usage) {
+          DemoLogger.info(`📊 Claude Token usage: ${usage.inputTokens} input + ${usage.outputTokens} output = ${usage.tokens} total`);
+          DemoLogger.info(`💰 Claude Estimated cost: $${usage.cost.toFixed(4)}`);
+        }
       }
     });
   } catch (error) {
@@ -102,18 +121,21 @@ async function demonstrateStreaming() {
   // 3. Multiple Concurrent Streams
   DemoLogger.step("Concurrent streaming demonstration");
   
-  const llm1 = litechain.llm.openai({
+  const llm1 = litechain({
+    provider: 'openai',
     apiKey: process.env.OPENAI_API_KEY!,
-    model: "gpt-4o-mini"
+    model: "gpt-4o-mini",
+    budget: { trackTokens: true, trackCost: true },
+    systemPrompt: "You are a technical expert. Provide detailed technical explanations."
   });
   
-  const llm2 = litechain.llm.openai({
+  const llm2 = litechain({
+    provider: 'openai',
     apiKey: process.env.OPENAI_API_KEY!,
-    model: "gpt-4o-mini"
+    model: "gpt-4o-mini",
+    budget: { trackTokens: true, trackCost: true },
+    systemPrompt: "You are a creative writer. Focus on storytelling and creativity."
   });
-
-  llm1.systemprompt = "You are a technical expert. Provide detailed technical explanations.";
-  llm2.systemprompt = "You are a creative writer. Focus on storytelling and creativity.";
 
   const prompts = [
     { llm: llm1, prompt: "Explain how HTTP works", id: "Technical" },
