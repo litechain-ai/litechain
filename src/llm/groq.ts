@@ -1,11 +1,13 @@
 import Groq from "groq-sdk";
-import { LLMBase } from "./base";
+import { LLMBase, LLMConfig } from "./base";
+import { StreamChunk } from "../types/streaming";
+import { StreamManager } from "../utils/streaming";
 
 class GroqClient extends LLMBase {
     private groq: Groq;
 
-    constructor(apiKey: string, model: string, tools?: any[]) {
-        super("groq", model);
+    constructor(apiKey: string, model: string, tools?: any[], config?: LLMConfig) {
+        super("groq", model, config);
         this.groq = new Groq({ apiKey });
         if (tools) {
             tools.forEach((tool) => {
@@ -63,7 +65,93 @@ class GroqClient extends LLMBase {
                 messages: currentHistory,
             });
         }
-        return res.choices[0].message.content || "";
+        
+        const finalResponse = res.choices[0].message.content || "";
+        
+        // Record token usage for budget tracking
+        if (res.usage && this.budgetTracker) {
+            this.recordTokenUsage({
+                inputTokens: res.usage.prompt_tokens,
+                outputTokens: res.usage.completion_tokens,
+                totalTokens: res.usage.total_tokens
+            });
+        }
+        
+        return finalResponse;
+    }
+
+    protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+        let currentHistory = [...this.state.history];
+        
+        const stream = await this.groq.chat.completions.create({
+            model: this.model,
+            messages: currentHistory,
+            stream: true,
+            tools: this.tools.map((tool) => ({
+                type: "function",
+                function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: {
+                        type: "object",
+                        properties: tool.parameters,
+                        required: Object.keys(tool.parameters),
+                    },
+                },
+            })),
+        });
+
+        const manager = new StreamManager();
+        let inputTokens = 0;
+        let outputTokens = 0;
+        const model = this.model;
+        const budgetTracker = this.budgetTracker;
+        const recordTokenUsage = this.recordTokenUsage.bind(this);
+
+        // Estimate input tokens (rough estimation)
+        inputTokens = Math.ceil(JSON.stringify(currentHistory).length / 4);
+
+        async function* streamGenerator() {
+            try {
+                for await (const chunk of stream) {
+                    const delta = chunk.choices[0]?.delta?.content || '';
+                    
+                    if (delta) {
+                        outputTokens += Math.ceil(delta.length / 4); // Rough token estimation
+                        const processedChunk = manager.processChunk(delta, {
+                            model: model,
+                            usage: { inputTokens, outputTokens }
+                        });
+                        yield processedChunk;
+                    }
+                    
+                    // Check if stream is done
+                    if (chunk.choices[0]?.finish_reason) {
+                        break;
+                    }
+                }
+                
+                // Complete the stream
+                const finalChunk = manager.complete();
+                
+                // Record token usage for budget tracking
+                if (budgetTracker) {
+                    recordTokenUsage({
+                        inputTokens,
+                        outputTokens,
+                        totalTokens: inputTokens + outputTokens
+                    });
+                }
+                
+                yield finalChunk;
+                
+            } catch (error) {
+                manager.error(error as Error);
+                throw error;
+            }
+        }
+
+        return streamGenerator();
     }
 }
 
@@ -71,10 +159,12 @@ export function createGroqClient({
     apiKey,
     model,
     tools,
+    config,
 }: {
     apiKey: string;
     model: string;
     tools?: any[];
+    config?: LLMConfig;
 }) {
-    return new GroqClient(apiKey, model, tools);
+    return new GroqClient(apiKey, model, tools, config);
 }

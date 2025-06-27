@@ -5,6 +5,9 @@ import { StreamChunk, StreamOptions, StreamResponse } from "../types/streaming";
 import { Memory, MemoryConfig, MemoryEntry } from "../types/memory";
 import { createMemory } from "../memory/factory";
 import { createStreamResponse, StreamManager } from "../utils/streaming";
+import { BudgetConfig, BudgetTracker, UsageStats, TokenUsage } from "../types/budget";
+import { EmbeddingConfig, EmbeddingProvider } from "../types/embeddings";
+import { createEmbeddingProvider } from "../embeddings/factory";
 
 export interface RunOptions {
   stream?: boolean;
@@ -12,6 +15,12 @@ export interface RunOptions {
   onComplete?: (fullContent: string) => void;
   onError?: (error: Error) => void;
   variables?: Record<string, string>;
+}
+
+export interface LLMConfig {
+  memoryConfig?: MemoryConfig;
+  budgetConfig?: BudgetConfig;
+  embeddingConfig?: EmbeddingConfig;
 }
 
 type LLMMessage =
@@ -36,8 +45,10 @@ export class LLMBase {
   public tools: Tool[] = [];
   public connections: ConnectionRoutes = {};
   public memory?: Memory;
+  public budgetTracker?: BudgetTracker;
+  public embeddingProvider?: EmbeddingProvider;
 
-  constructor(public name: string, public model: string, memoryConfig?: MemoryConfig) {
+  constructor(public name: string, public model: string, config?: LLMConfig) {
     this.state = {
       thread_id: uuidv4(),
       history: [],
@@ -46,9 +57,19 @@ export class LLMBase {
       current_llm: this.name,
     };
     
+    // Initialize budget tracking if configured
+    if (config?.budgetConfig) {
+      this.budgetTracker = new BudgetTracker(config.budgetConfig);
+    }
+    
+    // Initialize embedding provider if configured
+    if (config?.embeddingConfig) {
+      this.embeddingProvider = createEmbeddingProvider(config.embeddingConfig);
+    }
+    
     // Initialize memory if configured
-    if (memoryConfig) {
-      this.memory = createMemory(memoryConfig, this.state.thread_id);
+    if (config?.memoryConfig) {
+      this.memory = createMemory(config.memoryConfig, this.state.thread_id, this.embeddingProvider);
     }
   }
 
@@ -292,5 +313,58 @@ export class LLMBase {
       transfers: [],
       current_llm: this.name,
     };
+  }
+
+  /**
+   * Record token usage for budget tracking
+   */
+  protected recordTokenUsage(tokenUsage: TokenUsage): void {
+    if (this.budgetTracker) {
+      this.budgetTracker.recordUsage(this.model, tokenUsage);
+    }
+  }
+
+  /**
+   * Get current usage statistics
+   */
+  getUsage(): UsageStats | null {
+    return this.budgetTracker ? this.budgetTracker.getUsage() : null;
+  }
+
+  /**
+   * Update budget configuration
+   */
+  updateBudget(config: Partial<BudgetConfig>): void {
+    if (this.budgetTracker) {
+      this.budgetTracker.updateConfig(config);
+    } else {
+      this.budgetTracker = new BudgetTracker(config);
+    }
+  }
+
+  /**
+   * Set or update embedding provider
+   */
+  setEmbeddingProvider(provider: EmbeddingProvider): void {
+    this.embeddingProvider = provider;
+    if (this.memory && 'setEmbeddingProvider' in this.memory) {
+      (this.memory as any).setEmbeddingProvider(provider);
+    }
+  }
+
+  /**
+   * Get remaining budget
+   */
+  getRemainingBudget(): number | null {
+    return this.budgetTracker ? this.budgetTracker.getRemainingBudget() : null;
+  }
+
+  /**
+   * Reset usage statistics
+   */
+  resetUsage(): void {
+    if (this.budgetTracker) {
+      this.budgetTracker.reset();
+    }
   }
 }

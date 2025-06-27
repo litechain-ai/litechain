@@ -1,20 +1,22 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Memory, MemoryEntry, VectorMemory, MemoryStorage } from '../types/memory';
 import { FileMemoryStorage } from './storage';
+import { EmbeddingProvider, BaseEmbeddingProvider } from '../types/embeddings';
 
 /**
- * Simple vector memory implementation using basic text similarity
- * This is a basic implementation - in production you'd want to use proper embeddings
+ * Enhanced vector memory implementation using proper embeddings
  */
-export class SimpleVectorMemory implements Memory {
+export class EnhancedVectorMemory implements Memory {
   public type = 'vector';
   private storage: MemoryStorage;
   private sessionId: string;
   private vectorMemory: VectorMemory;
+  private embeddingProvider?: EmbeddingProvider;
 
-  constructor(sessionId?: string, storage?: MemoryStorage) {
+  constructor(sessionId?: string, storage?: MemoryStorage, embeddingProvider?: EmbeddingProvider) {
     this.sessionId = sessionId || uuidv4();
     this.storage = storage || new FileMemoryStorage();
+    this.embeddingProvider = embeddingProvider;
     this.vectorMemory = {
       entries: [],
       similarity: this.calculateSimilarity.bind(this)

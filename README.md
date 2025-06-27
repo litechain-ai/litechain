@@ -134,6 +134,8 @@ entryLLM.connect({ TECH: techLLM });
 - ⚡ **Simple Integration:** Just one import—no need to import types or utilities separately.
 - 🧩 **Extensible:** Add as many tools as you want, with custom parameters and logic.
 - 📊 **State Tracking:** Built-in conversation flow and transfer history for debugging and transparency.
+- 💰 **Budget Tracking:** Monitor token usage and costs across all LLM calls with automatic limit enforcement.
+- 🔍 **Custom Embeddings:** Use OpenAI, Cohere, HuggingFace, or your own embedding functions for enhanced vector memory.
 
 ---
 
@@ -156,11 +158,21 @@ import litechain from "litechain"; // One line import
 
 const llm = litechain.llm.openai({ // Yes, that's simple
   apiKey: process.env.OPENAI_API_KEY!,
-  model: "gpt-4o-mini"
+  model: "gpt-4o-mini",
+  budget: { limit: 10 }, // $10 budget limit
+  memory: 'vector', // Vector memory for context
+  embeddings: { // Custom embeddings for better search
+    provider: 'openai',
+    apiKey: process.env.OPENAI_API_KEY!
+  }
 });
 
 // Use invoke for standard responses  
 const response = await llm.invoke("Hello!");
+
+// Check budget usage
+const usage = llm.getUsage();
+console.log(`Cost: $${usage.cost.totalCost.toFixed(4)}`);
 
 // Use run for streaming and advanced options
 await llm.run("Write a story", {
@@ -886,177 +898,175 @@ await Promise.all(promises);
 
 ---
 
-## Memory & Persistent Storage
+## Budget Tracking
 
-Litechain provides **built-in memory management** with multiple storage backends:
+Litechain includes **built-in budget tracking** to monitor token usage and costs across all LLM calls:
 
-### Automatic Memory (Default)
+### Basic Budget Setup
+
 ```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
+import litechain from "litechain";
 
-// Automatic conversation memory - no setup needed
-await llm.invoke("My name is John");
-await llm.invoke("What's my name?"); // Remembers "John"
-
-// Access conversation state
-console.log("History:", llm.state.history.length);
-console.log("Thread ID:", llm.state.thread_id);
-```
-
-### File-based Persistent Memory
-```ts
-import { createMemory } from "litechain";
-
-// File-based memory that persists across sessions
-const memory = createMemory({
-  type: 'file',
-  path: './memory/conversations'
+const llm = litechain.llm.openai({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "gpt-4o-mini",
+  budget: {
+    limit: 10, // $10 USD limit
+    onExceeded: (usage) => {
+      console.log("Budget exceeded!", usage);
+    }
+  }
 });
 
-const llm = litechain.llm.openai({ 
-  apiKey: "...", 
-  model: "gpt-4",
-  memory: memory // Persistent across restarts
-});
-```
+// Use normally - budget is tracked automatically
+const response = await llm.invoke("Hello!");
 
-### Vector Memory for Semantic Search
-```ts
-// Vector memory for semantic similarity
-const vectorMemory = createMemory('vector');
-
-const llm = litechain.llm.openai({ 
-  apiKey: "...", 
-  model: "gpt-4",
-  memory: vectorMemory
-});
-
-// Automatically creates embeddings for semantic retrieval
-await llm.invoke("I love machine learning");
-await llm.invoke("Tell me about AI"); // Finds semantically similar context
-```
-
-### Memory Configuration Options
-```ts
-// Chat memory with custom limits
-const chatMemory = createMemory({
-  type: 'file',
-  path: './conversations',
-  maxMessages: 50
-});
-
-// Hybrid memory (combines chat + vector)
-const hybridMemory = new HybridMemory({
-  chatConfig: { type: 'file', path: './chat' },
-  vectorConfig: { type: 'local' }
-});
-```
-
----
-
-## Advanced State Management
-
-### Conversation Flow Tracking
-```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
-
-await llm.invoke("Calculate 5 * 10");
-await llm.invoke("Add 25 to that result");
-
-// Get detailed conversation flow
-const flow = llm.getConversationFlow();
-flow.forEach(entry => {
-  console.log(`[${entry.timestamp}] ${entry.llmName}: ${entry.response}`);
-});
-
-// Get transfer history (for chained LLMs)
-const transfers = llm.getTransferHistory();
-console.log("Transfers:", transfers.length);
-```
-
-### State Inspection & Debugging
-```ts
-// Access complete state information
-const state = llm.state;
+// Check current usage
+const usage = llm.getUsage();
 console.log({
-  threadId: state.thread_id,
-  historyLength: state.history.length,
-  conversationFlow: state.conversation_flow.length,
-  transfers: state.transfers.length,
-  currentLLM: state.current_llm
-});
-
-// Clear state for fresh conversation
-llm.clearState();
-```
-
----
-
-## Variable Interpolation
-
-Litechain supports **dynamic variable substitution** in system prompts:
-
-```ts
-const llm = litechain.llm.openai({ apiKey: "...", model: "gpt-4" });
-
-// Template variables in system prompt
-llm.systemprompt = "You are a {role} assistant helping with {task}. Be {tone} in your responses.";
-
-// Variables are replaced during invocation
-const response = await llm.invoke("Help me get started", {
-  role: "friendly coding",
-  task: "JavaScript development",
-  tone: "encouraging and detailed"
+  tokens: usage.tokens.totalTokens,
+  cost: usage.cost.totalCost // In USD
 });
 ```
 
----
+### Advanced Budget Features
 
-## Multi-Provider Examples
-
-### Seamless Provider Switching
 ```ts
-// Same interface across all providers
-const openaiLLM = litechain.llm.openai({ apiKey: "...", model: "gpt-4o-mini" });
-const geminiLLM = litechain.llm.gemini({ apiKey: "...", model: "gemini-2.0-flash" });
-const claudeLLM = litechain.llm.claude({ apiKey: "...", model: "claude-3-haiku" });
-const groqLLM = litechain.llm.groq({ apiKey: "...", model: "llama-3.1-8b-instant" });
-
-// All support same features: tools, streaming, chaining, memory
-[openaiLLM, geminiLLM, claudeLLM, groqLLM].forEach(llm => {
-  llm.systemprompt = "You are a helpful assistant";
-  llm.addTool(myTool);
+// Detailed budget configuration
+const llm = litechain.llm.openai({
+  apiKey: "...",
+  model: "gpt-4o-mini",
+  budget: {
+    limit: 50,
+    trackTokens: true,
+    onExceeded: (usage) => {
+      // Custom handler - log, send alert, etc.
+      console.log(`Budget exceeded: $${usage.cost.totalCost}`);
+      // Optionally stop execution or switch to cheaper model
+    }
+  }
 });
 
-// Compare responses across providers
+// Get detailed report
+console.log(llm.getBudgetReport());
+// Output:
+// Budget Usage Report:
+// - Tokens: 1,250 (800 input, 450 output)
+// - Cost: $0.0045 ($0.0024 input, $0.0021 output)
+// - Remaining: $49.9955
+// - Status: OK
+
+// Check if budget exceeded
+if (llm.isBudgetExceeded()) {
+  console.log("Switch to cheaper model or stop");
+}
+
+// Reset budget for new session
+llm.resetBudget();
+
+// Update budget limits dynamically
+llm.updateBudgetConfig({ limit: 100 });
+```
+
+### Budget Tracking Across Providers
+
+```ts
+// All providers support budget tracking
+const openai = litechain.llm.openai({ 
+  apiKey: "...", 
+  model: "gpt-4o-mini",
+  budget: { limit: 10 }
+});
+
+const gemini = litechain.llm.gemini({ 
+  apiKey: "...", 
+  model: "gemini-2.0-flash",
+  budget: { limit: 10 }
+});
+
+const claude = litechain.llm.claude({ 
+  apiKey: "...", 
+  model: "claude-3-haiku",
+  budget: { limit: 10 }
+});
+
+// Compare costs across providers
 const prompt = "Explain quantum computing";
-const responses = await Promise.all([
-  openaiLLM.invoke(prompt),
-  geminiLLM.invoke(prompt),
-  claudeLLM.invoke(prompt),
-  groqLLM.invoke(prompt)
+const [openaiResponse, geminiResponse, claudeResponse] = await Promise.all([
+  openai.invoke(prompt),
+  gemini.invoke(prompt),
+  claude.invoke(prompt)
 ]);
+
+console.log("Cost comparison:");
+console.log("OpenAI:", openai.getUsage().cost.totalCost);
+console.log("Gemini:", gemini.getUsage().cost.totalCost);
+console.log("Claude:", claude.getUsage().cost.totalCost);
+```
+
+### Streaming with Budget Tracking
+
+```ts
+await llm.run("Write a long essay", {
+  stream: true,
+  onChunk: (chunk) => {
+    process.stdout.write(chunk.delta);
+  },
+  onComplete: (content) => {
+    // Budget is automatically tracked during streaming
+    const usage = llm.getUsage();
+    console.log(`\nCost: $${usage.cost.totalCost.toFixed(4)}`);
+  }
+});
 ```
 
 ---
 
-## Roadmap
+## ✨ New Enhanced Features
 
-- [x] **Streaming support** ✅ Available now
-- [x] **File-based memory** ✅ Available now  
-- [x] **Vector memory** ✅ Available now
-- [x] **State management** ✅ Available now
-- [x] Function calling for Claude and Gemini ✅ Available now
-- [ ] Budget tracking
-- [ ] Custom embedding providers
+### 💰 **Budget Tracking**
 
----
+Track token usage and costs automatically with built-in budget limits:
 
-## License
+```ts
+const chain = litechain({
+  provider: 'openai',
+  model: "gpt-4o",
+  apiKey: "sk-...",
+  budget: {
+    limit: 10, // USD
+    onExceeded: () => console.log("Limit exceeded")
+  }
+});
 
-MIT
+const response = await chain.invoke("Hello!");
+const usage = chain.getUsage();
+// => { tokens: 5000, cost: 0.75, calls: 1, inputTokens: 2000, outputTokens: 3000 }
+```
 
----
+### 🎯 **Custom Embedding Providers**
 
-**Litechain** makes LLM tool/function calling and chaining easy and extensible.  
-PRs and feedback welcome! 
+Use built-in providers or custom embedding functions:
+
+```ts
+// Built-in provider
+const chain = litechain({
+  model: "gpt-4o",
+  apiKey: "sk-...",
+  embeddings: {
+    provider: "cohere",
+    apiKey: "...",
+    model: "embed-v3"
+  }
+});
+
+// Custom embedding function
+const chain = litechain({
+  model: "gpt-4o", 
+  apiKey: "sk-...",
+  embeddings: async (text) => {
+    // Your custom embedding logic
+    return [0.1, 0.2, 0.3]; // Return vector
+  }
+});
+```

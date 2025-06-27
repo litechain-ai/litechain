@@ -1,18 +1,19 @@
 import { Memory, MemoryConfig, FileMemoryConfig, RedisMemoryConfig, VectorMemoryConfig } from '../types/memory';
 import { ChatMemory } from './chat';
-import { SimpleVectorMemory } from './vector';
-import { FileMemoryStorage, InMemoryStorage } from './storage';
+import { EnhancedVectorMemory } from './vector';
+import { FileMemoryStorage } from './storage';
+import { EmbeddingProvider } from '../types/embeddings';
 
 /**
  * Factory function to create memory instances based on configuration
  */
-export function createMemory(config: MemoryConfig, sessionId?: string): Memory {
+export function createMemory(config: MemoryConfig, sessionId?: string, embeddingProvider?: EmbeddingProvider): Memory {
   if (typeof config === 'string') {
     switch (config) {
       case 'chat':
         return new ChatMemory(sessionId);
       case 'vector':
-        return new SimpleVectorMemory(sessionId);
+        return new EnhancedVectorMemory(sessionId, undefined, embeddingProvider);
       default:
         throw new Error(`Unknown memory type: ${config}`);
     }
@@ -34,7 +35,7 @@ export function createMemory(config: MemoryConfig, sessionId?: string): Memory {
     case 'vector':
       const vectorConfig = config as VectorMemoryConfig;
       if (vectorConfig.provider === 'local') {
-        return new SimpleVectorMemory(sessionId);
+        return new EnhancedVectorMemory(sessionId, undefined, embeddingProvider);
       }
       throw new Error(`Vector provider ${vectorConfig.provider} not yet implemented`);
     
@@ -49,11 +50,11 @@ export function createMemory(config: MemoryConfig, sessionId?: string): Memory {
 export class HybridMemory implements Memory {
   public type = 'hybrid';
   private chatMemory: ChatMemory;
-  private vectorMemory: SimpleVectorMemory;
+  private vectorMemory: EnhancedVectorMemory;
 
-  constructor(sessionId?: string) {
+  constructor(sessionId?: string, embeddingProvider?: EmbeddingProvider) {
     this.chatMemory = new ChatMemory(sessionId, 50); // Smaller chat history
-    this.vectorMemory = new SimpleVectorMemory(sessionId);
+    this.vectorMemory = new EnhancedVectorMemory(sessionId, undefined, embeddingProvider);
   }
 
   async store(entry: any): Promise<void> {
