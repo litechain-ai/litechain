@@ -11,7 +11,8 @@ import {
   ConversationFlowEntry 
 } from "./src/types/llm";
 
-export default {
+// Main litechain object with simplified API
+const litechain = {
   llm: {
     openai: createOpenAIClient,
     groq: createGroqClient,
@@ -19,6 +20,8 @@ export default {
     claude: createClaudeClient,
   }
 };
+
+export default litechain;
 
 // Export types for external use
 export {
@@ -29,3 +32,25 @@ export {
   TransferResponse,
   ConversationFlowEntry
 };
+
+// Export budget tracking types
+export type { 
+  BudgetConfig, 
+  UsageStats, 
+  TokenUsage, 
+  BudgetTracker 
+} from "./src/types/budget";
+
+// Export embedding types
+export type { 
+  EmbeddingConfig, 
+  EmbeddingProvider, 
+  EmbeddingVector,
+  OpenAIEmbeddingConfig,
+  CohereEmbeddingConfig,
+  HuggingFaceEmbeddingConfig,
+  CustomEmbeddingConfig
+} from "./src/types/embeddings";
+
+// Export LLM config type
+export type { LLMConfig } from "./src/llm/base";

@@ -135,6 +135,7 @@ export async function* createStreamIterator(
 
 /**
  * Extract only the delta (new token) from a stream chunk
+ * This is critical - we need ONLY the new tokens, not accumulated content
  */
 function extractDelta(chunk: any): string {
   // Handle different chunk formats from various providers
@@ -142,9 +143,15 @@ function extractDelta(chunk: any): string {
     return chunk;
   }
   
-  // OpenAI format
-  if (chunk.choices && chunk.choices[0]?.delta?.content) {
-    return chunk.choices[0].delta.content;
+  // OpenAI format - this is the key fix
+  if (chunk.choices && chunk.choices[0]?.delta?.content !== undefined) {
+    // Return only the delta content, which should be the new token(s)
+    return chunk.choices[0].delta.content || '';
+  }
+  
+  // Anthropic format
+  if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+    return chunk.delta.text;
   }
   
   // Gemini format
@@ -153,17 +160,24 @@ function extractDelta(chunk: any): string {
   }
   
   // Generic delta field
-  if (chunk.delta) {
-    return typeof chunk.delta === 'string' ? chunk.delta : chunk.delta.content || '';
+  if (chunk.delta !== undefined) {
+    if (typeof chunk.delta === 'string') {
+      return chunk.delta;
+    }
+    if (chunk.delta.content !== undefined) {
+      return chunk.delta.content;
+    }
+    if (chunk.delta.text !== undefined) {
+      return chunk.delta.text;
+    }
   }
   
-  // Generic content field (fallback)
-  if (chunk.content) {
+  // Only use content/text as fallback if no delta is available
+  if (chunk.content !== undefined) {
     return chunk.content;
   }
   
-  // Text field
-  if (chunk.text) {
+  if (chunk.text !== undefined) {
     return chunk.text;
   }
   
