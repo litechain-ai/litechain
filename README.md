@@ -1046,10 +1046,8 @@ const responses = await Promise.all([
 - [x] **File-based memory** ✅ Available now  
 - [x] **Vector memory** ✅ Available now
 - [x] **State management** ✅ Available now
-- [ ] Function calling for Claude and Gemini (when available)
-- [ ] Redis memory backend
-- [ ] Visual conversation flow diagrams
-- [ ] Performance metrics dashboard
+- [x] Function calling for Claude and Gemini ✅ Available now
+- [ ] Budget tracking
 - [ ] Custom embedding providers
 
 ---
