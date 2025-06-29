@@ -159,7 +159,42 @@ export class LLMBase {
    * Enhanced invoke method with chaining capabilities
    */
   async invoke(message: string, variables: Record<string, string> = {}): Promise<string> {
-    return this.run(message, { variables });
+    
+    const finalSystem = interpolatePrompt(this.systemprompt, variables);
+    const userPrompt = interpolatePrompt(message, variables);
+
+    if (this.state.history.length === 0 && this.systemprompt) {
+      this.state.history.push({ role: "system", content: finalSystem });
+    }
+
+    this.state.history.push({ role: "user", content: userPrompt });
+
+    // Get initial response from this LLM (this is where tool calling happens)
+    let response = await this._invoke(userPrompt);
+    this.state.history.push({ role: "assistant", content: response });
+
+    // Record initial conversation flow entry
+    const initialFlowEntry: ConversationFlowEntry = {
+      llmName: this.name,
+      message: userPrompt,
+      response,
+      timestamp: new Date()
+    };
+    this.state.conversation_flow.push(initialFlowEntry);
+
+    // Check for transfer patterns
+    const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
+    const escalateMatch = response.match(/\[ESCALATE:(\w+)\]/);
+
+    if (transferMatch) {
+      const target = transferMatch[1];
+      response = await this.handleTransfer(message, target, 'transfer');
+    } else if (escalateMatch) {
+      const target = escalateMatch[1];
+      response = await this.handleTransfer(message, target, 'escalate');
+    }
+
+    return response;
   }
 
   /**
