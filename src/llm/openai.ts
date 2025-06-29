@@ -19,10 +19,16 @@ class OpenAIClient extends LLMBase {
 
     protected async _invoke(prompt: string): Promise<string> {
         let currentHistory = [...this.state.history];
-        let res = await this.openai.chat.completions.create({
+        
+        // Prepare the API call options
+        const chatOptions: any = {
             model: this.model,
             messages: currentHistory,
-            tools: this.tools.map((tool) => ({
+        };
+        
+        // Only add tools if we have any
+        if (this.tools.length > 0) {
+            chatOptions.tools = this.tools.map((tool) => ({
                 type: "function",
                 function: {
                     name: tool.name,
@@ -33,10 +39,14 @@ class OpenAIClient extends LLMBase {
                         required: Object.keys(tool.parameters),
                     },
                 },
-            })),
-        });
+            }));
+        } else {
+        }
+        
+        let res = await this.openai.chat.completions.create(chatOptions);
 
         while (res.choices[0].message.tool_calls) {
+            
             // 1. Add the assistant message with tool_calls
             const assistantMsg = {
                 role: "assistant" as const,
@@ -91,6 +101,20 @@ class OpenAIClient extends LLMBase {
     }
 
     protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+        // If we have tools, fall back to non-streaming since streaming + function calling is complex
+        if (this.tools.length > 0) {
+            const response = await this._invoke(prompt);
+            const manager = new StreamManager();
+            
+            async function* fallbackStream() {
+                yield manager.processChunk(response);
+                yield manager.complete();
+            }
+            
+            return fallbackStream();
+        }
+
+        // Original streaming implementation for when no tools are present
         let currentHistory = [...this.state.history];
         
         const stream = await this.openai.chat.completions.create({

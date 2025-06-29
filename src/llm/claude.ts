@@ -31,7 +31,6 @@ class ClaudeClient extends LLMBase {
         const text = Array.isArray(res.content)
             ? res.content.map((block: any) => typeof block.text === "string" ? block.text : "").join("")
             : "";
-            
         // Record token usage for budget tracking
         if (res.usage && this.budgetTracker) {
             this.recordTokenUsage({
@@ -40,7 +39,6 @@ class ClaudeClient extends LLMBase {
                 totalTokens: res.usage.input_tokens + res.usage.output_tokens
             });
         }
-        
         return text;
     }
 
@@ -71,14 +69,12 @@ class ClaudeClient extends LLMBase {
         async function* streamGenerator() {
             try {
                 let fullText = '';
-                
                 for await (const chunk of stream) {
                     if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
                         const chunkText = chunk.delta.text;
                         if (chunkText) {
                             fullText += chunkText;
                             outputTokens += Math.ceil(chunkText.length / 4);
-                            
                             const processedChunk = manager.processChunk(chunkText, {
                                 model: model,
                                 usage: { inputTokens, outputTokens }
@@ -86,16 +82,13 @@ class ClaudeClient extends LLMBase {
                             yield processedChunk;
                         }
                     }
-                    
                     // Check for message completion
                     if (chunk.type === 'message_stop' || chunk.type === 'content_block_stop') {
                         break;
                     }
                 }
-                
                 // Complete the stream
                 const finalChunk = manager.complete();
-                
                 // Record token usage for budget tracking
                 if (budgetTracker) {
                     recordTokenUsage({
@@ -104,15 +97,12 @@ class ClaudeClient extends LLMBase {
                         totalTokens: inputTokens + outputTokens
                     });
                 }
-                
                 yield finalChunk;
-                
             } catch (error) {
                 manager.error(error as Error);
                 throw error;
             }
         }
-
         return streamGenerator();
     }
 }

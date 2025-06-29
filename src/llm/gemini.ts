@@ -19,12 +19,10 @@ class GeminiClient extends LLMBase {
     protected async _invoke(prompt: string): Promise<string> {
         let currentHistory = [...this.state.history];
         
-        // Only include tools config if we actually have tools defined
-        let config: any = {};
         
-        if (this.tools.length > 0) {
-            // Convert tools to Gemini function declarations
-            const functionDeclarations = this.tools.map((tool) => ({
+        // Convert tools to Gemini function declarations
+        const functionDeclarations = this.tools.map((tool) => {
+            return {
                 name: tool.name,
                 description: tool.description,
                 parameters: {
@@ -38,14 +36,15 @@ class GeminiClient extends LLMBase {
                     }, {} as any),
                     required: Object.keys(tool.parameters),
                 },
-            }));
-
-            config = {
-                tools: [{
-                    function_declarations: functionDeclarations
-                }]
             };
-        }
+        });
+
+        const config = this.tools.length > 0 ? {
+            tools: [{
+                functionDeclarations
+            }]
+        } : {};
+
 
         // Filter out system messages and convert to Gemini format
         // For Gemini, we'll prepend system content to the first user message
@@ -67,63 +66,70 @@ class GeminiClient extends LLMBase {
 
         // Loop until no more function calls
         while (true) {
-            const generateOptions: any = {
+            const apiCall = {
                 model: this.model,
                 contents,
+                ...(Object.keys(config).length > 0 && { config })
             };
             
-            // Only add tools config if we have tools
-            if (this.tools.length > 0) {
-                generateOptions.tools = config.tools;
-            }
-            
-            const result = await this.ai.models.generateContent(generateOptions);
+            const result = await this.ai.models.generateContent(apiCall);
+
 
             if (result.functionCalls && result.functionCalls.length > 0) {
+                
                 // Execute all function calls
                 for (const functionCall of result.functionCalls) {
+                    
                     const tool = this.tools.find((t) => t.name === functionCall.name);
-                    if (!tool) throw new Error(`Tool not found: ${functionCall.name}`);
+                    if (!tool) {
+                        console.error(`[ERROR] Tool not found: ${functionCall.name}`);
+                        throw new Error(`Tool not found: ${functionCall.name}`);
+                    }
                     
-                    const toolResponse = await tool.execute(functionCall.args || {});
-                    
-                    // Create function response part
-                    const functionResponsePart = {
-                        name: functionCall.name || "",
-                        response: { result: toolResponse }
-                    };
+                    try {
+                        const toolResponse = await tool.execute(functionCall.args || {});
+                        
+                        // Create function response part
+                        const functionResponsePart = {
+                            name: functionCall.name || "",
+                            response: { result: toolResponse }
+                        };
 
-                    // Add the model's response with function call
-                    contents.push({
-                        role: "model",
-                        parts: [{ functionCall } as any]
-                    });
+                        // Add the model's response with function call
+                        contents.push({
+                            role: "model",
+                            parts: [{ functionCall } as any]
+                        });
 
-                    // Add the function response
-                    contents.push({
-                        role: "user",
-                        parts: [{ functionResponse: functionResponsePart } as any]
-                    });
+                        // Add the function response
+                        contents.push({
+                            role: "user",
+                            parts: [{ functionResponse: functionResponsePart } as any]
+                        });
 
-                    // Add to persistent state - only access text if no function calls
-                    const responseText = result.functionCalls.length === 0 ? (result.text || "") : "";
-                    this.state.history.push({
-                        role: "assistant" as const,
-                        content: responseText,
-                        tool_calls: [{
-                            id: functionCall.name || "",
-                            function: {
-                                name: functionCall.name || "",
-                                arguments: JSON.stringify(functionCall.args || {})
-                            }
-                        }]
-                    } as any);
+                        // Add to persistent state - only access text if no function calls
+                        const responseText = result.functionCalls.length === 0 ? (result.text || "") : "";
+                        this.state.history.push({
+                            role: "assistant" as const,
+                            content: responseText,
+                            tool_calls: [{
+                                id: functionCall.name || "",
+                                function: {
+                                    name: functionCall.name || "",
+                                    arguments: JSON.stringify(functionCall.args || {})
+                                }
+                            }]
+                        } as any);
 
-                    this.state.history.push({
-                        role: "tool" as const,
-                        tool_call_id: functionCall.name || "",
-                        content: toolResponse
-                    });
+                        this.state.history.push({
+                            role: "tool" as const,
+                            tool_call_id: functionCall.name || "",
+                            content: toolResponse
+                        });
+                    } catch (toolError) {
+                        console.error(`[ERROR] Tool execution failed for ${functionCall.name}:`, toolError);
+                        throw toolError;
+                    }
                 }
             } else {
                 // No more function calls, return the final response
@@ -148,6 +154,20 @@ class GeminiClient extends LLMBase {
     }
 
     protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+        // If we have tools, fall back to non-streaming since streaming + function calling is complex
+        if (this.tools.length > 0) {
+            const response = await this._invoke(prompt);
+            const manager = new StreamManager();
+            
+            async function* fallbackStream() {
+                yield manager.processChunk(response);
+                yield manager.complete();
+            }
+            
+            return fallbackStream();
+        }
+
+        // Original streaming implementation for when no tools are present
         let currentHistory = [...this.state.history];
         
         // Only include tools config if we actually have tools defined

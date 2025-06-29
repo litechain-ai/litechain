@@ -67,7 +67,6 @@ class GroqClient extends LLMBase {
         }
         
         const finalResponse = res.choices[0].message.content || "";
-        
         // Record token usage for budget tracking
         if (res.usage && this.budgetTracker) {
             this.recordTokenUsage({
@@ -81,6 +80,19 @@ class GroqClient extends LLMBase {
     }
 
     protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+        // If we have tools, fall back to non-streaming since streaming + function calling is complex
+        if (this.tools.length > 0) {
+            const response = await this._invoke(prompt);
+            const manager = new StreamManager();
+            
+            async function* fallbackStream() {
+                yield manager.processChunk(response);
+                yield manager.complete();
+            }
+            
+            return fallbackStream();
+        }
+
         let currentHistory = [...this.state.history];
         
         const stream = await this.groq.chat.completions.create({
