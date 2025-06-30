@@ -21,17 +21,33 @@ async function demonstrateStreaming() {
   DemoLogger.step("Basic streaming with chunk handling");
   
   const llm = litechain({
-    provider: 'claude',
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-    model: "claude-3-5-sonnet-20241022",
+    provider: 'gemini',
+    apiKey: process.env.GEMINI_API_KEY!,
+    model: "gemini-2.0-flash",
     budget: {
       trackTokens: true,
       trackCost: true
     },
-    systemPrompt: "You are a creative storyteller. Write engaging, detailed responses."
+    systemPrompt: "Help users"
   });
 
-  const prompt = "Write a short story about a robot discovering emotions for the first time.";
+  llm.addTool({
+    name: "Add",
+    description: "Add two numbers",
+    parameters: {
+      type: "object",
+      properties: {
+        a: { type: "number" },
+        b: { type: "number" }
+      }
+    },
+    execute: async (params) => {
+      console.log("Adding numbers", params);
+      return (params.a + params.b).toString();
+    }
+  });
+
+  const prompt = "what is result of 452+345? ";
   DemoLogger.user(prompt);
   
   let fullContent = '';

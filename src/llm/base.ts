@@ -14,6 +14,7 @@ export interface RunOptions {
   onChunk?: (chunk: StreamChunk) => void;
   onComplete?: (fullContent: string) => void;
   onError?: (error: Error) => void;
+  onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void;
   variables?: Record<string, string>;
 }
 
@@ -77,7 +78,7 @@ export class LLMBase {
     throw new Error("Method not implemented");
   }
 
-  protected async _invokeStream(prompt: string): Promise<AsyncIterableIterator<StreamChunk>> {
+  protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
     // Default implementation: fallback to non-streaming
     const response = await this._invoke(prompt);
     const manager = new StreamManager();
@@ -232,7 +233,7 @@ export class LLMBase {
     
     if (stream) {
       // Handle streaming
-      const streamIterator = await this._invokeStream(fullPrompt);
+      const streamIterator = await this._invokeStream(fullPrompt, { onFunctionCall: options.onFunctionCall });
       let fullContent = '';
       
       for await (const chunk of streamIterator) {
@@ -320,7 +321,7 @@ export class LLMBase {
   private async _createStreamPromise(message: string, options: RunOptions): Promise<AsyncIterableIterator<StreamChunk>> {
     // This is a simplified version - in practice you'd want to handle memory/context here too
     const finalPrompt = interpolatePrompt(message, options.variables || {});
-    return this._invokeStream(finalPrompt);
+    return this._invokeStream(finalPrompt, { onFunctionCall: options.onFunctionCall });
   }
 
   /**
