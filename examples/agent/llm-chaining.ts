@@ -1,4 +1,4 @@
-import litechain from "litechain";
+import litechain from "../../dist/index.js";
 import dotenv from "dotenv";
 
 dotenv.config();
