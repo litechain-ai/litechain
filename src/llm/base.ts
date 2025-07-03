@@ -104,8 +104,14 @@ export class LLMBase {
 
   /**
    * Handle transfer or escalation to connected LLM/function
+   * Now forwards RunOptions (including onFunctionCall) to the target LLM.
    */
-  protected async handleTransfer(message: string, target: string, type: 'transfer' | 'escalate'): Promise<string> {
+  protected async handleTransfer(
+    message: string,
+    target: string,
+    type: 'transfer' | 'escalate',
+    options: RunOptions = {}
+  ): Promise<string> {
     const connection = this.connections[target];
     
     if (!connection) {
@@ -132,8 +138,9 @@ export class LLMBase {
         // Handle LLM connection
         // Create a fresh message for the connected LLM to avoid tool call issues
         const cleanMessage = message.replace(/\[TRANSFER:\w+\]|\[ESCALATE:\w+\]/g, '').trim();
-        response = await connection.invoke(cleanMessage);
-        
+        // Forward options (including onFunctionCall) to the target LLM
+        response = await connection.run(cleanMessage, options);
+
         // Merge conversation flow from connected LLM
         this.state.conversation_flow.push(...connection.state.conversation_flow);
       }
@@ -158,9 +165,13 @@ export class LLMBase {
 
   /**
    * Enhanced invoke method with chaining capabilities
+   * Now accepts RunOptions and forwards them on transfer/escalate.
    */
-  async invoke(message: string, variables: Record<string, string> = {}): Promise<string> {
-    
+  async invoke(
+    message: string,
+    variables: Record<string, string> = {},
+    options: RunOptions = {}
+  ): Promise<string> {
     const finalSystem = interpolatePrompt(this.systemprompt, variables);
     const userPrompt = interpolatePrompt(message, variables);
 
@@ -189,10 +200,10 @@ export class LLMBase {
 
     if (transferMatch) {
       const target = transferMatch[1];
-      response = await this.handleTransfer(message, target, 'transfer');
+      response = await this.handleTransfer(message, target, 'transfer', options);
     } else if (escalateMatch) {
       const target = escalateMatch[1];
-      response = await this.handleTransfer(message, target, 'escalate');
+      response = await this.handleTransfer(message, target, 'escalate', options);
     }
 
     return response;
@@ -200,6 +211,7 @@ export class LLMBase {
 
   /**
    * Main run method with streaming and memory support
+   * Now forwards RunOptions on transfer/escalate.
    */
   async run(message: string, options: RunOptions = {}): Promise<string> {
     const { variables = {}, stream = false } = options;
@@ -296,10 +308,10 @@ export class LLMBase {
 
     if (transferMatch) {
       const target = transferMatch[1];
-      response = await this.handleTransfer(message, target, 'transfer');
+      response = await this.handleTransfer(message, target, 'transfer', options);
     } else if (escalateMatch) {
       const target = escalateMatch[1];
-      response = await this.handleTransfer(message, target, 'escalate');
+      response = await this.handleTransfer(message, target, 'escalate', options);
     }
 
     return response;
