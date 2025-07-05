@@ -55,13 +55,9 @@ ${toolDescriptions}
 TOOL USAGE FORMAT:
 When you need to use a tool, write: [TOOL_CALL:tool_name:{"param1": "value1", "param2": "value2"}]
 
-You may call multiple tools in a single response if needed. To do so, include each tool call in its own [TOOL_CALL:...] block, one after another.
+Example: [TOOL_CALL:fetchDietPlan:{"uid": "user123"}]
 
-Example (multiple tool calls):
-[TOOL_CALL:fetchDietPlan:{"uid": "user123"}]
-[TOOL_CALL:getWeather:{"city": "New York"}]
-
-After the tool call(s), continue with your response based on the tool result(s).`;
+After the tool call, continue with your response based on the tool result.`;
             
             contents.push({
                 role: "user",
@@ -99,65 +95,86 @@ After the tool call(s), continue with your response based on the tool result(s).
             try {
                 let currentContents = [...contents];
                 let accumulatedText = '';
-                const toolCallPattern = /\[TOOL_CALL:([^:]+):(\{[^\}]+\})\]/g;
+                let toolCallBuffer = '';
+                let inToolCall = false;
 
                 while (true) {
                     const generateOptions: any = {
                         model: modelName,
                         contents: currentContents,
                     };
+                    
                     const result = await model.generateContentStream(generateOptions);
 
-                    let chunkBuffer = '';
-                    let toolCalls: any[] = [];
                     let hasToolCalls = false;
-
+                    let toolCalls: any[] = [];
+                    
                     for await (const chunk of result) {
                         const chunkText = chunk.text || '';
-                        outputTokens += Math.ceil(chunkText.length / 4);
-                        chunkBuffer += chunkText;
-                    }
-
-                    // Find all tool calls in the buffer
-                    let lastIndex = 0;
-                    let match;
-                    toolCallPattern.lastIndex = 0;
-                    while ((match = toolCallPattern.exec(chunkBuffer)) !== null) {
-                        hasToolCalls = true;
-                        // Text before this tool call is assistant output
-                        const beforeToolCall = chunkBuffer.slice(lastIndex, match.index);
-                        if (beforeToolCall) {
-                            accumulatedText += beforeToolCall;
-                            const processedChunk = manager.processChunk(beforeToolCall, {
+                        
+                        if (chunkText) {
+                            outputTokens += Math.ceil(chunkText.length / 4);
+                            
+                            // Check for tool call patterns in the text
+                            if (!inToolCall && (chunkText.includes('[TOOL_CALL:') || chunkText.includes('['))) {
+                                inToolCall = true;
+                                toolCallBuffer = chunkText;
+                                continue;
+                            }
+                            
+                            if (inToolCall) {
+                                toolCallBuffer += chunkText;
+                                
+                                // Check if tool call is complete
+                                if (toolCallBuffer.includes(']') && toolCallBuffer.includes('[TOOL_CALL:')) {
+                                    inToolCall = false;
+                                    hasToolCalls = true;
+                                    
+                                    // Parse the tool call
+                                    const toolCallMatch = toolCallBuffer.match(/\[TOOL_CALL:([^:]+):(\{[^}]+\})\]/);
+                                    if (toolCallMatch) {
+                                        const toolName = toolCallMatch[1].trim();
+                                        const argsString = toolCallMatch[2].trim();
+                                        
+                                        try {
+                                            const args = JSON.parse(argsString);
+                                            toolCalls.push({ name: toolName, args });
+                                        } catch (parseError) {
+                                            console.error("Failed to parse tool args:", parseError);
+                                        }
+                                    } else {
+                                        // Try a more flexible regex
+                                        const flexibleMatch = toolCallBuffer.match(/\[TOOL_CALL:([^:]+):(.+)\]/);
+                                        if (flexibleMatch) {
+                                            const toolName = flexibleMatch[1].trim();
+                                            const argsString = flexibleMatch[2].trim();
+                                            
+                                            try {
+                                                const args = JSON.parse(argsString);
+                                                toolCalls.push({ name: toolName, args });
+                                            } catch (parseError) {
+                                                console.error("Failed to parse tool args with flexible regex:", parseError);
+                                            }
+                                        }
+                                    }
+                                    
+                                    toolCallBuffer = '';
+                                }
+                                continue;
+                            }
+                            
+                            // Regular text chunk
+                            accumulatedText += chunkText;
+                            
+                            const processedChunk = manager.processChunk(chunkText, {
                                 model: modelName,
                                 usage: { inputTokens, outputTokens }
                             });
                             yield processedChunk;
                         }
-                        // Parse tool call
-                        const toolName = match[1].trim();
-                        const argsString = match[2].trim();
-                        let args = {};
-                        try {
-                            args = JSON.parse(argsString);
-                        } catch (parseError) {
-                            console.error("Failed to parse tool args:", parseError);
-                        }
-                        toolCalls.push({ name: toolName, args });
-                        lastIndex = match.index + match[0].length;
                     }
-                    // Any text after the last tool call
-                    const afterLastToolCall = chunkBuffer.slice(lastIndex);
-                    if (afterLastToolCall) {
-                        accumulatedText += afterLastToolCall;
-                        const processedChunk = manager.processChunk(afterLastToolCall, {
-                            model: modelName,
-                            usage: { inputTokens, outputTokens }
-                        });
-                        yield processedChunk;
-                    }
-
-                    // Process all tool calls found
+                    
+                    // Process any tool calls found
                     if (hasToolCalls && toolCalls.length > 0) {
                         for (const toolCall of toolCalls) {
                             // Invoke onFunctionCall callback if provided
@@ -167,6 +184,7 @@ After the tool call(s), continue with your response based on the tool result(s).
                                     args: toolCall.args
                                 });
                             }
+                            
                             // Yield tool call start chunk
                             yield {
                                 content: '',
@@ -178,13 +196,16 @@ After the tool call(s), continue with your response based on the tool result(s).
                                     tool_args: toolCall.args
                                 }
                             } as StreamChunk;
+                            
                             // Execute the tool
                             const tool = tools.find((t: any) => t.name === toolCall.name);
                             if (!tool) {
                                 throw new Error(`Tool not found: ${toolCall.name}`);
                             }
+                            
                             try {
                                 const toolResponse = await tool.execute(toolCall.args || {});
+                                
                                 // Yield tool result chunk
                                 yield {
                                     content: toolResponse,
@@ -197,15 +218,18 @@ After the tool call(s), continue with your response based on the tool result(s).
                                         tool_response: toolResponse
                                     }
                                 } as StreamChunk;
+                                
                                 // Update conversation context
                                 currentContents.push({
                                     role: "model",
                                     parts: [{ text: accumulatedText }]
                                 });
+                                
                                 currentContents.push({
                                     role: "user",
                                     parts: [{ text: `Tool result for ${toolCall.name}: ${toolResponse}` }]
                                 });
+                                
                                 // Update persistent state
                                 state.history.push({
                                     role: "assistant" as const,
@@ -218,26 +242,34 @@ After the tool call(s), continue with your response based on the tool result(s).
                                         }
                                     }]
                                 } as any);
+                                
                                 state.history.push({
                                     role: "tool" as const,
                                     tool_call_id: toolCall.name || "",
                                     content: toolResponse
                                 });
+                                
                                 // Reset accumulated text for next iteration
                                 accumulatedText = '';
+                                
                             } catch (toolError) {
                                 console.error(`[ERROR] Tool execution failed for ${toolCall.name}:`, toolError);
                                 throw toolError;
                             }
                         }
+                        
                         // Continue with next iteration to get more content
                         continue;
                     }
+                    
                     // If no tool calls were found, we're done
                     break;
                 }
+                
                 // Complete the stream
                 const finalChunk = manager.complete();
+                
+                // Record token usage for budget tracking
                 if (budgetTracker) {
                     recordTokenUsage({
                         inputTokens,
@@ -245,7 +277,9 @@ After the tool call(s), continue with your response based on the tool result(s).
                         totalTokens: inputTokens + outputTokens
                     });
                 }
+                
                 yield finalChunk;
+                
             } catch (error) {
                 manager.error(error as Error);
                 throw error;
