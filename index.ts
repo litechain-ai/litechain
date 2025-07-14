@@ -31,13 +31,17 @@ export interface LitechainConfig {
   // Other configurations
   systemPrompt?: string;
   tools?: any[];
+  /**
+   * Maximum number of messages to keep in context window (history). If not set, unlimited.
+   */
+  maxContextWindow?: number;
 }
 
 /**
  * Create a litechain instance with enhanced configuration
  */
 function createLitechain(config: LitechainConfig): LLMBase {
-  const { provider = 'openai', model, apiKey, budget, embeddings, systemPrompt, tools } = config;
+  const { provider = 'openai', model, apiKey, budget, embeddings, systemPrompt, tools, maxContextWindow } = config;
   
   // Prepare LLM configuration
   const llmConfig: LLMConfig = {};
@@ -74,6 +78,10 @@ function createLitechain(config: LitechainConfig): LLMBase {
       // Handle provider-based embeddings
       llmConfig.embeddingConfig = embeddings;
     }
+  }
+  // Pass maxContextWindow only
+  if (typeof maxContextWindow === 'number') {
+    llmConfig.maxContextWindow = maxContextWindow;
   }
   
   // Create the LLM instance based on provider

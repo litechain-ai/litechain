@@ -129,12 +129,16 @@ async function demonstrateCustomEmbeddings() {
 
   DemoLogger.response("✅ Custom batch embedding function configured");
 
-  // Test with memory (if configured)
-  if (chainWithCustomSingle.memory) {
-    DemoLogger.step("Testing memory with custom embeddings");
-    await chainWithCustomSingle.invoke("Remember that I like pizza");
-    await chainWithCustomSingle.invoke("What food do I like?");
+  // Test with memory (always run the test and log the result)
+  DemoLogger.step("Testing memory with custom embeddings");
+  const rememberResponse = await chainWithCustomSingle.invoke("Remember that I like pizza");
+  DemoLogger.response(`Response to 'Remember that I like pizza': ${rememberResponse}`);
+  const recallResponse = await chainWithCustomSingle.invoke("What food do I like?");
+  DemoLogger.response(`Response to 'What food do I like?': ${recallResponse}`);
+  if (!chainWithCustomSingle.memory) {
+    DemoLogger.warning("Memory is not enabled for this chain. The recall may not work as expected.");
   }
+
 
   DemoLogger.separator();
 }

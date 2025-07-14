@@ -22,6 +22,8 @@ export interface LLMConfig {
   memoryConfig?: MemoryConfig;
   budgetConfig?: BudgetConfig;
   embeddingConfig?: EmbeddingConfig;
+  maxContextWindow?: number; // max number of messages to keep in history
+  // summarisation?: boolean;   // REMOVE
 }
 
 type LLMMessage =
@@ -48,8 +50,13 @@ export class LLMBase {
   public memory?: Memory;
   public budgetTracker?: BudgetTracker;
   public embeddingProvider?: EmbeddingProvider;
+  public maxContextWindow?: number; // keep
+  // public summarisation?: boolean;   // REMOVE
+  // public summaryOfDiscarded: string = ""; // REMOVE
 
   constructor(public name: string, public model: string, config?: LLMConfig) {
+    this.maxContextWindow = config?.maxContextWindow;
+    // this.summarisation = config?.summarisation; // REMOVE
     this.state = {
       thread_id: uuidv4(),
       history: [],
@@ -169,10 +176,12 @@ export class LLMBase {
     }
 
     this.state.history.push({ role: "user", content: userPrompt });
+    // No prune here
 
     // Get initial response from this LLM (this is where tool calling happens)
     let response = await this._invoke(userPrompt);
     this.state.history.push({ role: "assistant", content: response });
+    await this.pruneHistoryIfNeeded(); // Only after assistant
 
     // Record initial conversation flow entry
     const initialFlowEntry: ConversationFlowEntry = {
@@ -218,16 +227,18 @@ export class LLMBase {
     const finalSystem = interpolatePrompt(this.systemprompt, variables);
     const userPrompt = interpolatePrompt(message, variables);
     
-    // Prepare the full prompt with memory context
-    const fullPrompt = memoryContext 
-      ? `Context from memory:\n${memoryContext}\n\nUser: ${userPrompt}`
-      : userPrompt;
+    // Prepare the full prompt with memory context only
+    let fullPrompt = userPrompt;
+    if (memoryContext) {
+      fullPrompt = `Context from memory:\n${memoryContext}\n\nUser: ${userPrompt}`;
+    }
 
     if (this.state.history.length === 0 && this.systemprompt) {
       this.state.history.push({ role: "system", content: finalSystem });
     }
 
     this.state.history.push({ role: "user", content: fullPrompt });
+    // No prune here
 
     let response: string;
     
@@ -258,6 +269,7 @@ export class LLMBase {
     }
 
     this.state.history.push({ role: "assistant", content: response });
+    await this.pruneHistoryIfNeeded(); // Only after assistant
 
     // Store in memory if available
     if (this.memory) {
@@ -403,4 +415,14 @@ export class LLMBase {
       this.budgetTracker.reset();
     }
   }
+
+  // Make pruneHistoryIfNeeded async and use LLM for summarisation
+  private async pruneHistoryIfNeeded() {
+    if (this.maxContextWindow && this.state.history.length > this.maxContextWindow) {
+      const numToPrune = this.state.history.length - this.maxContextWindow;
+      this.state.history.splice(0, numToPrune);
+    }
+  }
+
+  // Remove the old summariseMessages method
 }
