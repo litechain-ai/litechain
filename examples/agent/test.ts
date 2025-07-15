@@ -29,10 +29,10 @@ const main = async () => {
   ];
 
   for (let i = 0; i < questions.length; i++) {
-    await llm.run(questions[i]);
+    await llm.run(questions[i], {}, `conversation-${i}`);
     console.log(`\nAfter message ${i + 1}:`);
-    console.log('History:', llm.state.history.map(m => ({ role: m.role, content: m.content.slice(0, 60) })));
-    console.log('History length:', llm.state.history.length);
+    console.log('History:', llm.getConversationFlow(`conversation-${i}`));
+    console.log('History length:', llm.getConversationFlow(`conversation-${i}`).length);
     // Removed summary logging
   }
 }
