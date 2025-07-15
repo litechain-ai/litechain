@@ -16,12 +16,17 @@ class ClaudeClient extends LLMBase {
         }
     }
 
-    protected async _invoke(prompt: string): Promise<string> {
-        let currentHistory = [...this.state.history];
+    protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
         // Only include 'user' and 'assistant' roles for Claude
-        const messages = currentHistory
+        let messages = currentHistory
             .filter((msg) => msg.role === "user" || msg.role === "assistant")
             .map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content }));
+        // Ensure messages is never empty
+        if (messages.length === 0 && prompt) {
+            messages = [{ role: "user", content: prompt }];
+        }
         const res = await this.anthropic.messages.create({
             model: this.model,
             max_tokens: 1024,
@@ -42,8 +47,9 @@ class ClaudeClient extends LLMBase {
         return text;
     }
 
-    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
-        let currentHistory = [...this.state.history];
+    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
         
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
@@ -74,9 +80,13 @@ After the tool call, continue with your response based on the tool result.`;
         }
 
         // Only include 'user' and 'assistant' roles for Claude
-        const messages = currentHistory
+        let messages = currentHistory
             .filter((msg) => msg.role === "user" || msg.role === "assistant")
             .map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content }));
+        // Ensure messages is never empty
+        if (messages.length === 0 && prompt) {
+            messages = [{ role: "user", content: prompt }];
+        }
 
         const manager = new StreamManager();
         let inputTokens = 0;
@@ -85,7 +95,6 @@ After the tool call, continue with your response based on the tool result.`;
         const budgetTracker = this.budgetTracker;
         const recordTokenUsage = this.recordTokenUsage.bind(this);
         const tools = this.tools;
-        const state = this.state;
         const anthropic = this.anthropic;
 
         // Estimate input tokens

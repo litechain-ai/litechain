@@ -16,8 +16,13 @@ class GroqClient extends LLMBase {
         }
     }
 
-    protected async _invoke(prompt: string): Promise<string> {
-        let currentHistory = [...this.state.history];
+    protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
+        // Ensure currentHistory is never empty
+        if (currentHistory.length === 0 && prompt) {
+            currentHistory = [{ role: "user", content: prompt }];
+        }
         let res = await this.groq.chat.completions.create({
             model: this.model,
             messages: currentHistory,
@@ -58,8 +63,8 @@ class GroqClient extends LLMBase {
                 assistantMsg,
                 ...toolMessages,
             ];
-            this.state.history.push(assistantMsg);
-            toolMessages.forEach(msg => this.state.history.push(msg));
+            state.history.push(assistantMsg);
+            toolMessages.forEach(msg => state.history.push(msg));
             res = await this.groq.chat.completions.create({
                 model: this.model,
                 messages: currentHistory,
@@ -79,8 +84,13 @@ class GroqClient extends LLMBase {
         return finalResponse;
     }
 
-    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
-        let currentHistory = [...this.state.history];
+    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
+        // Ensure currentHistory is never empty
+        if (currentHistory.length === 0 && prompt) {
+            currentHistory = [{ role: "user", content: prompt }];
+        }
         
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
@@ -104,7 +114,7 @@ Example: [TOOL_CALL:fetchDietPlan:{"uid": "user123"}]
 
 After the tool call, continue with your response based on the tool result.`;
             
-            currentHistory.unshift({
+            state.history.unshift({
                 role: "user",
                 content: toolInstruction
             });
@@ -117,7 +127,6 @@ After the tool call, continue with your response based on the tool result.`;
         const budgetTracker = this.budgetTracker;
         const recordTokenUsage = this.recordTokenUsage.bind(this);
         const tools = this.tools;
-        const state = this.state;
         const groq = this.groq;
 
         // Estimate input tokens

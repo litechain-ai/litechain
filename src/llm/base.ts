@@ -23,7 +23,6 @@ export interface LLMConfig {
   budgetConfig?: BudgetConfig;
   embeddingConfig?: EmbeddingConfig;
   maxContextWindow?: number; // max number of messages to keep in history
-  // summarisation?: boolean;   // REMOVE
 }
 
 type LLMMessage =
@@ -43,7 +42,7 @@ export type Tool<P = Record<string, any>> = {
 }
 
 export class LLMBase {
-  public state: EnhancedLLMState;
+  private conversationStates: Record<string, EnhancedLLMState> = {};
   public systemprompt: string = "";
   public tools: Tool[] = [];
   public connections: ConnectionRoutes = {};
@@ -51,13 +50,12 @@ export class LLMBase {
   public budgetTracker?: BudgetTracker;
   public embeddingProvider?: EmbeddingProvider;
   public maxContextWindow?: number; // keep
-  // public summarisation?: boolean;   // REMOVE
-  // public summaryOfDiscarded: string = ""; // REMOVE
+
 
   constructor(public name: string, public model: string, config?: LLMConfig) {
     this.maxContextWindow = config?.maxContextWindow;
-    // this.summarisation = config?.summarisation; // REMOVE
-    this.state = {
+    // Initialize default conversation state
+    this.conversationStates["default"] = {
       thread_id: uuidv4(),
       history: [],
       conversation_flow: [],
@@ -77,7 +75,7 @@ export class LLMBase {
     
     // Initialize memory if configured
     if (config?.memoryConfig) {
-      this.memory = createMemory(config.memoryConfig, this.state.thread_id, this.embeddingProvider);
+      this.memory = createMemory(config.memoryConfig, this.conversationStates["default"].thread_id, this.embeddingProvider);
     }
   }
 
@@ -109,11 +107,25 @@ export class LLMBase {
     this.connections = { ...this.connections, ...routes };
   }
 
+  protected getOrCreateState(conversationId: string = "default"): EnhancedLLMState {
+    if (!this.conversationStates[conversationId]) {
+      this.conversationStates[conversationId] = {
+        thread_id: uuidv4(),
+        history: [],
+        conversation_flow: [],
+        transfers: [],
+        current_llm: this.name,
+      };
+    }
+    return this.conversationStates[conversationId];
+  }
+
   /**
    * Handle transfer or escalation to connected LLM/function
    */
-  protected async handleTransfer(message: string, target: string, type: 'transfer' | 'escalate'): Promise<string> {
+  protected async handleTransfer(message: string, target: string, type: 'transfer' | 'escalate', conversationId: string = "default"): Promise<string> {
     const connection = this.connections[target];
+    const state = this.getOrCreateState(conversationId);
     
     if (!connection) {
       console.warn(`No connection found for target: ${target}`);
@@ -127,7 +139,7 @@ export class LLMBase {
       originalResponse: '',
       timestamp: new Date()
     };
-    this.state.transfers.push(transfer);
+    state.transfers.push(transfer);
 
     try {
       let response: string;
@@ -142,7 +154,7 @@ export class LLMBase {
         response = await connection.invoke(cleanMessage);
         
         // Merge conversation flow from connected LLM
-        this.state.conversation_flow.push(...connection.state.conversation_flow);
+        state.conversation_flow.push(...connection.getConversationFlow());
       }
 
       // Record the conversation flow entry
@@ -153,7 +165,7 @@ export class LLMBase {
         timestamp: new Date(),
         transferTarget: target
       };
-      this.state.conversation_flow.push(flowEntry);
+      state.conversation_flow.push(flowEntry);
 
       return response;
     } catch (error) {
@@ -166,22 +178,23 @@ export class LLMBase {
   /**
    * Enhanced invoke method with chaining capabilities
    */
-  async invoke(message: string, variables: Record<string, string> = {}): Promise<string> {
+  async invoke(message: string, variables: Record<string, string> = {}, conversationId: string = "default"): Promise<string> {
     
+    const state = this.getOrCreateState(conversationId);
     const finalSystem = interpolatePrompt(this.systemprompt, variables);
     const userPrompt = interpolatePrompt(message, variables);
 
-    if (this.state.history.length === 0 && this.systemprompt) {
-      this.state.history.push({ role: "system", content: finalSystem });
+    if (state.history.length === 0 && this.systemprompt) {
+      state.history.push({ role: "system", content: finalSystem });
     }
 
-    this.state.history.push({ role: "user", content: userPrompt });
+    state.history.push({ role: "user", content: userPrompt });
     // No prune here
 
     // Get initial response from this LLM (this is where tool calling happens)
     let response = await this._invoke(userPrompt);
-    this.state.history.push({ role: "assistant", content: response });
-    await this.pruneHistoryIfNeeded(); // Only after assistant
+    state.history.push({ role: "assistant", content: response });
+    await this.pruneHistoryIfNeeded(state); // Only after assistant
 
     // Record initial conversation flow entry
     const initialFlowEntry: ConversationFlowEntry = {
@@ -190,7 +203,7 @@ export class LLMBase {
       response,
       timestamp: new Date()
     };
-    this.state.conversation_flow.push(initialFlowEntry);
+    state.conversation_flow.push(initialFlowEntry);
 
     // Check for transfer patterns
     const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
@@ -198,10 +211,10 @@ export class LLMBase {
 
     if (transferMatch) {
       const target = transferMatch[1];
-      response = await this.handleTransfer(message, target, 'transfer');
+      response = await this.handleTransfer(message, target, 'transfer', conversationId);
     } else if (escalateMatch) {
       const target = escalateMatch[1];
-      response = await this.handleTransfer(message, target, 'escalate');
+      response = await this.handleTransfer(message, target, 'escalate', conversationId);
     }
 
     return response;
@@ -210,8 +223,9 @@ export class LLMBase {
   /**
    * Main run method with streaming and memory support
    */
-  async run(message: string, options: RunOptions = {}): Promise<string> {
+  async run(message: string, options: RunOptions = {}, conversationId: string = "default"): Promise<string> {
     const { variables = {}, stream = false } = options;
+    const state = this.getOrCreateState(conversationId);
     
     // Load memory context if available
     let memoryContext = '';
@@ -233,11 +247,11 @@ export class LLMBase {
       fullPrompt = `Context from memory:\n${memoryContext}\n\nUser: ${userPrompt}`;
     }
 
-    if (this.state.history.length === 0 && this.systemprompt) {
-      this.state.history.push({ role: "system", content: finalSystem });
+    if (state.history.length === 0 && this.systemprompt) {
+      state.history.push({ role: "system", content: finalSystem });
     }
 
-    this.state.history.push({ role: "user", content: fullPrompt });
+    state.history.push({ role: "user", content: fullPrompt });
     // No prune here
 
     let response: string;
@@ -268,8 +282,8 @@ export class LLMBase {
       response = await this._invoke(fullPrompt);
     }
 
-    this.state.history.push({ role: "assistant", content: response });
-    await this.pruneHistoryIfNeeded(); // Only after assistant
+    state.history.push({ role: "assistant", content: response });
+    await this.pruneHistoryIfNeeded(state); // Only after assistant
 
     // Store in memory if available
     if (this.memory) {
@@ -300,7 +314,7 @@ export class LLMBase {
       response,
       timestamp: new Date()
     };
-    this.state.conversation_flow.push(flowEntry);
+    state.conversation_flow.push(flowEntry);
 
     // Check for transfer patterns
     const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
@@ -308,10 +322,10 @@ export class LLMBase {
 
     if (transferMatch) {
       const target = transferMatch[1];
-      response = await this.handleTransfer(message, target, 'transfer');
+      response = await this.handleTransfer(message, target, 'transfer', conversationId);
     } else if (escalateMatch) {
       const target = escalateMatch[1];
-      response = await this.handleTransfer(message, target, 'escalate');
+      response = await this.handleTransfer(message, target, 'escalate', conversationId);
     }
 
     return response;
@@ -320,17 +334,17 @@ export class LLMBase {
   /**
    * Create a streaming response
    */
-  async stream(message: string, options: StreamOptions = {}): Promise<StreamResponse> {
+  async stream(message: string, options: StreamOptions = {}, conversationId: string = "default"): Promise<StreamResponse> {
     const streamOptions: RunOptions = {
       ...options,
       stream: true
     };
 
-    const streamPromise = this._createStreamPromise(message, streamOptions);
+    const streamPromise = this._createStreamPromise(message, streamOptions, conversationId);
     return createStreamResponse(streamPromise, options);
   }
 
-  private async _createStreamPromise(message: string, options: RunOptions): Promise<AsyncIterableIterator<StreamChunk>> {
+  private async _createStreamPromise(message: string, options: RunOptions, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
     // This is a simplified version - in practice you'd want to handle memory/context here too
     const finalPrompt = interpolatePrompt(message, options.variables || {});
     return this._invokeStream(finalPrompt, { onFunctionCall: options.onFunctionCall });
@@ -339,22 +353,22 @@ export class LLMBase {
   /**
    * Get conversation flow for debugging
    */
-  getConversationFlow(): ConversationFlowEntry[] {
-    return this.state.conversation_flow;
+  getConversationFlow(conversationId: string = "default"): ConversationFlowEntry[] {
+    return this.getOrCreateState(conversationId).conversation_flow;
   }
 
   /**
    * Get transfer history for debugging
    */
-  getTransferHistory(): TransferResponse[] {
-    return this.state.transfers;
+  getTransferHistory(conversationId: string = "default"): TransferResponse[] {
+    return this.getOrCreateState(conversationId).transfers;
   }
 
   /**
    * Clear conversation state
    */
-  clearState(): void {
-    this.state = {
+  clearState(conversationId: string = "default"): void {
+    this.conversationStates[conversationId] = {
       thread_id: uuidv4(),
       history: [],
       conversation_flow: [],
@@ -417,12 +431,11 @@ export class LLMBase {
   }
 
   // Make pruneHistoryIfNeeded async and use LLM for summarisation
-  private async pruneHistoryIfNeeded() {
-    if (this.maxContextWindow && this.state.history.length > this.maxContextWindow) {
-      const numToPrune = this.state.history.length - this.maxContextWindow;
-      this.state.history.splice(0, numToPrune);
+  private async pruneHistoryIfNeeded(state: EnhancedLLMState) {
+    if (this.maxContextWindow && state.history.length > this.maxContextWindow) {
+      const numToPrune = state.history.length - this.maxContextWindow;
+      state.history.splice(0, numToPrune);
     }
   }
 
-  // Remove the old summariseMessages method
 }

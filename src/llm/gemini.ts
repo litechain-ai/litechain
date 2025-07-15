@@ -16,10 +16,11 @@ class GeminiClient extends LLMBase {
         }
     }
 
-    protected async _invoke(prompt: string): Promise<string> {
+    protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
+        const state = this.getOrCreateState(conversationId);
         // For backward compatibility, we'll collect all chunks and return the final result
         const chunks: string[] = [];
-        const stream = await this._invokeStream(prompt);
+        const stream = await this._invokeStream(prompt, undefined, conversationId);
         
         for await (const chunk of stream) {
             if (chunk.content) {
@@ -30,8 +31,8 @@ class GeminiClient extends LLMBase {
         return chunks.join('');
     }
 
-    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
-        let currentHistory = [...this.state.history];
+    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
+        const state = this.getOrCreateState(conversationId);
         
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
@@ -65,7 +66,7 @@ After the tool call, continue with your response based on the tool result.`;
             });
         }
         
-        for (const msg of currentHistory) {
+        for (const msg of state.history) {
             if (msg.role === "system") {
                 systemPrompt = msg.content;
             } else if (msg.role === "user") {
@@ -75,7 +76,11 @@ After the tool call, continue with your response based on the tool result.`;
             } else if (msg.role === "assistant") {
                 contents.push({ role: "model", parts: [{ text: msg.content }] });
             }
-            // Skip tool messages for now - they're handled differently in function calling
+            // Skip tool messages for now
+        }
+        // Ensure contents is never empty
+        if (contents.length === 0 && prompt) {
+            contents.push({ role: "user", parts: [{ text: prompt }] });
         }
 
         const model = this.ai.models;
@@ -86,7 +91,7 @@ After the tool call, continue with your response based on the tool result.`;
         const budgetTracker = this.budgetTracker;
         const recordTokenUsage = this.recordTokenUsage.bind(this);
         const tools = this.tools;
-        const state = this.state;
+        // Remove: const state = this.state; (no duplicate declaration)
 
         // Estimate input tokens
         inputTokens = Math.ceil(JSON.stringify(contents).length / 4);

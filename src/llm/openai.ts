@@ -17,8 +17,13 @@ class OpenAIClient extends LLMBase {
         }
     }
 
-    protected async _invoke(prompt: string): Promise<string> {
-        let currentHistory = [...this.state.history];
+    protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
+        // Ensure currentHistory is never empty
+        if (currentHistory.length === 0 && prompt) {
+            currentHistory = [{ role: "user", content: prompt }];
+        }
         
         // Prepare the API call options
         const chatOptions: any = {
@@ -69,19 +74,21 @@ class OpenAIClient extends LLMBase {
             );
 
             // 3. Update the history
-            currentHistory = [
+            state.history.push(assistantMsg);
+            toolMessages.forEach(msg => state.history.push(msg));
+            const updatedHistory = [
                 ...currentHistory,
                 assistantMsg,
                 ...toolMessages,
             ];
             // Also push to this.state.history for persistent state
-            this.state.history.push(assistantMsg);
-            toolMessages.forEach(msg => this.state.history.push(msg));
+            // state.history.push(assistantMsg); // This line is removed as per the edit hint
+            // toolMessages.forEach(msg => state.history.push(msg)); // This line is removed as per the edit hint
 
             // 4. Get the next LLM response
             res = await this.openai.chat.completions.create({
                 model: this.model,
-                messages: currentHistory,
+                messages: updatedHistory,
             });
         }
 
@@ -100,8 +107,13 @@ class OpenAIClient extends LLMBase {
         return finalResponse;
     }
 
-    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
-        let currentHistory = [...this.state.history];
+    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
+        const state = this.getOrCreateState(conversationId);
+        let currentHistory = [...state.history];
+        // Ensure currentHistory is never empty
+        if (currentHistory.length === 0 && prompt) {
+            currentHistory = [{ role: "user", content: prompt }];
+        }
         
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
@@ -138,7 +150,6 @@ After the tool call, continue with your response based on the tool result.`;
         const budgetTracker = this.budgetTracker;
         const recordTokenUsage = this.recordTokenUsage.bind(this);
         const tools = this.tools;
-        const state = this.state;
         const openai = this.openai;
 
         // Estimate input tokens
