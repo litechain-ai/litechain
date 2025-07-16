@@ -46,41 +46,53 @@ class GeminiClient extends LLMBase {
         let systemPrompt = "";
         let contents: any[] = [];
         
-        // Add system instruction for tool usage
-        if (this.tools.length > 0) {
-            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:
-
-AVAILABLE TOOLS:
-${toolDescriptions}
-
-TOOL USAGE FORMAT:
-When you need to use a tool, write: [TOOL_CALL:tool_name:{"param1": "value1", "param2": "value2"}]
-
-Example: [TOOL_CALL:fetchDietPlan:{"uid": "user123"}]
-
-After the tool call, continue with your response based on the tool result.`;
-            
-            contents.push({
-                role: "user",
-                parts: [{ text: toolInstruction }]
-            });
+        // Get the interpolated system prompt from history, or fall back to original
+        let currentSystemPrompt = "";
+        if (state.history.length > 0 && state.history[0].role === "system") {
+            currentSystemPrompt = state.history[0].content;
+        } else {
+            currentSystemPrompt = this.systemprompt;
         }
         
+        // Build merged system prompt (system prompt + tool instructions)
+        let mergedSystemPrompt = "";
+        if (this.tools.length > 0) {
+            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:
+\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nAfter the tool call, continue with your response based on the tool result.`;
+            if (currentSystemPrompt) {
+                mergedSystemPrompt = `${currentSystemPrompt}\n\n${toolInstruction}`;
+            } else {
+                mergedSystemPrompt = toolInstruction;
+            }
+        } else if (currentSystemPrompt) {
+            mergedSystemPrompt = currentSystemPrompt;
+        }
+
+        // Build contents array, but do NOT add a 'system' message
+        let firstUserAdded = false;
         for (const msg of state.history) {
             if (msg.role === "system") {
-                systemPrompt = msg.content;
+                // Never send system messages to Gemini
+                continue;
             } else if (msg.role === "user") {
-                const userContent = systemPrompt ? `${systemPrompt}\n\n${msg.content}` : msg.content;
-                contents.push({ role: "user", parts: [{ text: userContent }] });
-                systemPrompt = ""; // Only add system prompt to first user message
+                if (!firstUserAdded && mergedSystemPrompt) {
+                    contents.push({ role: "user", parts: [{ text: `${mergedSystemPrompt}\n\n${msg.content}` }] });
+                    firstUserAdded = true;
+                } else {
+                    contents.push({ role: "user", parts: [{ text: msg.content }] });
+                }
             } else if (msg.role === "assistant") {
                 contents.push({ role: "model", parts: [{ text: msg.content }] });
             }
             // Skip tool messages for now
         }
-        // Ensure contents is never empty
-        if (contents.length === 0 && prompt) {
-            contents.push({ role: "user", parts: [{ text: prompt }] });
+        // If no user message was added from history, add the prompt as a user message (with system prompt if needed)
+        if (!firstUserAdded && prompt) {
+            if (mergedSystemPrompt) {
+                contents.push({ role: "user", parts: [{ text: `${mergedSystemPrompt}\n\n${prompt}` }] });
+            } else {
+                contents.push({ role: "user", parts: [{ text: prompt }] });
+            }
         }
 
         const model = this.ai.models;

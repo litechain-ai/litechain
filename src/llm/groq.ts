@@ -92,6 +92,50 @@ class GroqClient extends LLMBase {
             currentHistory = [{ role: "user", content: prompt }];
         }
         
+        // Get the interpolated system prompt from history, or fall back to original
+        let currentSystemPrompt = "";
+        if (state.history.length > 0 && state.history[0].role === "system") {
+            currentSystemPrompt = state.history[0].content;
+        } else {
+            currentSystemPrompt = this.systemprompt;
+        }
+        
+        // Merge system prompt and tool instruction if tools are present
+        let mergedSystemPrompt = "";
+        if (this.tools.length > 0) {
+            const toolDescriptions = this.tools.map((tool) => {
+                const params = Object.entries(tool.parameters)
+                    .map(([key, value]) => `${key} (${value.type}): ${value.description}`)
+                    .join(', ');
+                return `- ${tool.name}: ${tool.description}. Parameters: ${params}`;
+            }).join('\n');
+            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:\n\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nAfter the tool call, continue with your response based on the tool result.`;
+            if (currentSystemPrompt) {
+                mergedSystemPrompt = `${currentSystemPrompt}\n\n${toolInstruction}`;
+            } else {
+                mergedSystemPrompt = toolInstruction;
+            }
+        } else if (currentSystemPrompt) {
+            mergedSystemPrompt = currentSystemPrompt;
+        }
+        // Build currentHistory with merged system prompt
+        let firstUserAdded = false;
+        let newHistory: { role: "user" | "assistant" | "system"; content: string }[] = [];
+        if (mergedSystemPrompt) {
+            newHistory.push({ role: "system", content: mergedSystemPrompt });
+        }
+        for (const msg of currentHistory) {
+            if (msg.role === "system") continue;
+            if (msg.role === "user" && !firstUserAdded) {
+                newHistory.push({ role: "user", content: msg.content });
+                firstUserAdded = true;
+            } else if (msg.role === "assistant") {
+                newHistory.push({ role: "assistant", content: msg.content });
+            }
+            // Do not include 'tool' messages in the array sent to Groq
+        }
+        currentHistory = newHistory;
+
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
             const params = Object.entries(tool.parameters)

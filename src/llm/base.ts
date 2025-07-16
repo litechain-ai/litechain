@@ -79,13 +79,13 @@ export class LLMBase {
     }
   }
 
-  protected async _invoke(prompt: string): Promise<string> {
+  protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
     throw new Error("Method not implemented");
   }
 
-  protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }): Promise<AsyncIterableIterator<StreamChunk>> {
+  protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
     // Default implementation: fallback to non-streaming
-    const response = await this._invoke(prompt);
+    const response = await this._invoke(prompt, conversationId);
     const manager = new StreamManager();
     
     async function* fallbackStream() {
@@ -184,15 +184,23 @@ export class LLMBase {
     const finalSystem = interpolatePrompt(this.systemprompt, variables);
     const userPrompt = interpolatePrompt(message, variables);
 
-    if (state.history.length === 0 && this.systemprompt) {
-      state.history.push({ role: "system", content: finalSystem });
+    // --- Ensure system prompt is always up-to-date in history ---
+    if (this.systemprompt) {
+      if (state.history.length > 0 && state.history[0].role === "system") {
+        // Update the first system message
+        state.history[0].content = finalSystem;
+      } else {
+        // Insert system prompt at the start
+        state.history.unshift({ role: "system", content: finalSystem });
+      }
     }
+    // --- End system prompt update logic ---
 
     state.history.push({ role: "user", content: userPrompt });
     // No prune here
 
     // Get initial response from this LLM (this is where tool calling happens)
-    let response = await this._invoke(userPrompt);
+    let response = await this._invoke(userPrompt, conversationId);
     state.history.push({ role: "assistant", content: response });
     await this.pruneHistoryIfNeeded(state); // Only after assistant
 
@@ -247,9 +255,17 @@ export class LLMBase {
       fullPrompt = `Context from memory:\n${memoryContext}\n\nUser: ${userPrompt}`;
     }
 
-    if (state.history.length === 0 && this.systemprompt) {
-      state.history.push({ role: "system", content: finalSystem });
+    // --- Ensure system prompt is always up-to-date in history ---
+    if (this.systemprompt) {
+      if (state.history.length > 0 && state.history[0].role === "system") {
+        // Update the first system message
+        state.history[0].content = finalSystem;
+      } else {
+        // Insert system prompt at the start
+        state.history.unshift({ role: "system", content: finalSystem });
+      }
     }
+    // --- End system prompt update logic ---
 
     state.history.push({ role: "user", content: fullPrompt });
     // No prune here
@@ -258,7 +274,7 @@ export class LLMBase {
     
     if (stream) {
       // Handle streaming
-      const streamIterator = await this._invokeStream(fullPrompt, { onFunctionCall: options.onFunctionCall });
+      const streamIterator = await this._invokeStream(fullPrompt, { onFunctionCall: options.onFunctionCall }, conversationId);
       let fullContent = '';
       
       for await (const chunk of streamIterator) {
@@ -279,7 +295,7 @@ export class LLMBase {
       }
     } else {
       // Handle non-streaming
-      response = await this._invoke(fullPrompt);
+      response = await this._invoke(fullPrompt, conversationId);
     }
 
     state.history.push({ role: "assistant", content: response });
@@ -347,7 +363,7 @@ export class LLMBase {
   private async _createStreamPromise(message: string, options: RunOptions, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
     // This is a simplified version - in practice you'd want to handle memory/context here too
     const finalPrompt = interpolatePrompt(message, options.variables || {});
-    return this._invokeStream(finalPrompt, { onFunctionCall: options.onFunctionCall });
+    return this._invokeStream(finalPrompt, { onFunctionCall: options.onFunctionCall }, conversationId);
   }
 
   /**

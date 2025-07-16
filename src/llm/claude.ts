@@ -19,13 +19,53 @@ class ClaudeClient extends LLMBase {
     protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
         const state = this.getOrCreateState(conversationId);
         let currentHistory = [...state.history];
+        
+        // Get the interpolated system prompt from history, or fall back to original
+        let currentSystemPrompt = "";
+        if (state.history.length > 0 && state.history[0].role === "system") {
+            currentSystemPrompt = state.history[0].content;
+        } else {
+            currentSystemPrompt = this.systemprompt;
+        }
+        
+        // Build merged system prompt (system prompt + tool instructions)
+        let mergedSystemPrompt = "";
+        if (this.tools.length > 0) {
+            const toolDescriptions = this.tools.map((tool) => {
+                const params = Object.entries(tool.parameters)
+                    .map(([key, value]) => `${key} (${value.type}): ${value.description}`)
+                    .join(', ');
+                return `- ${tool.name}: ${tool.description}. Parameters: ${params}`;
+            }).join('\n');
+            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:\n\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nAfter the tool call, continue with your response based on the tool result.`;
+            if (currentSystemPrompt) {
+                mergedSystemPrompt = `${currentSystemPrompt}\n\n${toolInstruction}`;
+            } else {
+                mergedSystemPrompt = toolInstruction;
+            }
+        } else if (currentSystemPrompt) {
+            mergedSystemPrompt = currentSystemPrompt;
+        }
         // Only include 'user' and 'assistant' roles for Claude
         let messages = currentHistory
             .filter((msg) => msg.role === "user" || msg.role === "assistant")
             .map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content }));
-        // Ensure messages is never empty
-        if (messages.length === 0 && prompt) {
-            messages = [{ role: "user", content: prompt }];
+        // Prepend mergedSystemPrompt to first user message
+        let firstUserAdded = false;
+        messages = messages.map((msg) => {
+            if (!firstUserAdded && msg.role === "user" && mergedSystemPrompt) {
+                firstUserAdded = true;
+                return { ...msg, content: `${mergedSystemPrompt}\n\n${msg.content}` };
+            }
+            return msg;
+        });
+        // If no user message was added from history, add the prompt as a user message (with system prompt if needed)
+        if (!firstUserAdded && prompt) {
+            if (mergedSystemPrompt) {
+                messages.unshift({ role: "user", content: `${mergedSystemPrompt}\n\n${prompt}` });
+            } else {
+                messages.unshift({ role: "user", content: prompt });
+            }
         }
         const res = await this.anthropic.messages.create({
             model: this.model,
@@ -50,6 +90,14 @@ class ClaudeClient extends LLMBase {
     protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
         const state = this.getOrCreateState(conversationId);
         let currentHistory = [...state.history];
+        
+        // Get the interpolated system prompt from history, or fall back to original
+        let currentSystemPrompt = "";
+        if (state.history.length > 0 && state.history[0].role === "system") {
+            currentSystemPrompt = state.history[0].content;
+        } else {
+            currentSystemPrompt = this.systemprompt;
+        }
         
         // Create tool descriptions for system prompt
         const toolDescriptions = this.tools.map((tool) => {
@@ -79,13 +127,44 @@ After the tool call, continue with your response based on the tool result.`;
             });
         }
 
+        // Build merged system prompt (system prompt + tool instructions)
+        let mergedSystemPrompt = "";
+        if (this.tools.length > 0) {
+            const toolDescriptions = this.tools.map((tool) => {
+                const params = Object.entries(tool.parameters)
+                    .map(([key, value]) => `${key} (${value.type}): ${value.description}`)
+                    .join(', ');
+                return `- ${tool.name}: ${tool.description}. Parameters: ${params}`;
+            }).join('\n');
+            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:\n\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nAfter the tool call, continue with your response based on the tool result.`;
+            if (currentSystemPrompt) {
+                mergedSystemPrompt = `${currentSystemPrompt}\n\n${toolInstruction}`;
+            } else {
+                mergedSystemPrompt = toolInstruction;
+            }
+        } else if (currentSystemPrompt) {
+            mergedSystemPrompt = currentSystemPrompt;
+        }
         // Only include 'user' and 'assistant' roles for Claude
         let messages = currentHistory
             .filter((msg) => msg.role === "user" || msg.role === "assistant")
             .map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content }));
-        // Ensure messages is never empty
-        if (messages.length === 0 && prompt) {
-            messages = [{ role: "user", content: prompt }];
+        // Prepend mergedSystemPrompt to first user message
+        let firstUserAdded = false;
+        messages = messages.map((msg) => {
+            if (!firstUserAdded && msg.role === "user" && mergedSystemPrompt) {
+                firstUserAdded = true;
+                return { ...msg, content: `${mergedSystemPrompt}\n\n${msg.content}` };
+            }
+            return msg;
+        });
+        // If no user message was added from history, add the prompt as a user message (with system prompt if needed)
+        if (!firstUserAdded && prompt) {
+            if (mergedSystemPrompt) {
+                messages.unshift({ role: "user", content: `${mergedSystemPrompt}\n\n${prompt}` });
+            } else {
+                messages.unshift({ role: "user", content: prompt });
+            }
         }
 
         const manager = new StreamManager();
