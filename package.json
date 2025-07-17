@@ -1,6 +1,6 @@
 {
   "name": "litechain",
-  "version": "0.0.21", 
+  "version": "0.0.22", 
   "description": "The zero-boilerplate LLM framework for humans.",
   "type": "module",
   "main": "./dist/index.js",

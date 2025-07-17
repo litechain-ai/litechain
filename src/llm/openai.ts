@@ -132,7 +132,7 @@ class OpenAIClient extends LLMBase {
                     .join(', ');
                 return `- ${tool.name}: ${tool.description}. Parameters: ${params}`;
             }).join('\n');
-            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:\n\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nAfter the tool call, continue with your response based on the tool result.`;
+            const toolInstruction = `You have access to the following tools. When you need to use a tool, format your response as follows:\n\nAVAILABLE TOOLS:\n${toolDescriptions}\n\nTOOL USAGE FORMAT:\nWhen you need to use a tool, write: [TOOL_CALL:tool_name:{\"param1\": \"value1\", \"param2\": \"value2\"}]\n\nExample: [TOOL_CALL:fetchDietPlan:{\"uid\": \"user123\"}]\n\nDo NOT use Markdown code blocks or triple backticks. Only use the format above. After the tool call, continue with your response based on the tool result.`;
             if (currentSystemPrompt) {
                 mergedSystemPrompt = `${currentSystemPrompt}\n\n${toolInstruction}`;
             } else {
