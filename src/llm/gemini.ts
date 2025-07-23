@@ -18,17 +18,25 @@ class GeminiClient extends LLMBase {
 
     protected async _invoke(prompt: string, conversationId: string = "default"): Promise<string> {
         const state = this.getOrCreateState(conversationId);
-        // For backward compatibility, we'll collect all chunks and return the final result
-        const chunks: string[] = [];
         const stream = await this._invokeStream(prompt, undefined, conversationId);
-        
+
+        let result = "";
+        let last = "";
+
         for await (const chunk of stream) {
             if (chunk.content) {
-                chunks.push(chunk.content);
+                // Only add the new delta if chunk.content is full-so-far
+                if (chunk.content.startsWith(last)) {
+                    result += chunk.content.slice(last.length);
+                } else {
+                    // fallback: just append (for pure delta streams)
+                    result += chunk.content;
+                }
+                last = chunk.content;
             }
         }
-        
-        return chunks.join('');
+
+        return result;
     }
 
     protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
