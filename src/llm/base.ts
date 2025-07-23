@@ -176,14 +176,53 @@ export class LLMBase {
   }
 
   /**
-   * Enhanced invoke method with chaining capabilities
+   * Generate a response from the LLM. Stateless by default unless conversationId is provided in options.
+   * @param message The user prompt
+   * @param variables Optional variables for prompt interpolation
+   * @param options Optional object: { conversationId, stateless }
+   *   - If stateless is true, no context/history is used or updated.
+   *   - If conversationId is provided (and stateless is not true), stateful mode is used.
    */
-  async invoke(message: string, variables: Record<string, string> = {}, conversationId: string = "default"): Promise<string> {
-    
+  async invoke(
+    message: string,
+    variables?: Record<string, string>,
+    options?: { conversationId?: string; stateless?: boolean } | string
+  ): Promise<string> {
+    // Backward compatibility: if options is a string, treat as conversationId
+    let conversationId: string | undefined = undefined;
+    let stateless = false;
+    if (typeof options === "string") {
+      conversationId = options;
+    } else if (typeof options === "object" && options !== null) {
+      conversationId = options.conversationId;
+      stateless = !!options.stateless;
+    }
+    // If stateless, do not use or update any state/history
+    if (stateless || !conversationId) {
+      const finalSystem = interpolatePrompt(this.systemprompt, variables || {});
+      const userPrompt = interpolatePrompt(message, variables || {});
+      // Optionally include system prompt in stateless mode
+      let prompt = userPrompt;
+      if (this.systemprompt) {
+        prompt = `${finalSystem}\n${userPrompt}`;
+      }
+      let response = await this._invoke(prompt, "stateless");
+      // Check for transfer/escalate patterns (stateless transfer is allowed)
+      const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
+      const escalateMatch = response.match(/\[ESCALATE:(\w+)\]/);
+      if (transferMatch) {
+        const target = transferMatch[1];
+        response = await this.handleTransfer(message, target, 'transfer', "stateless");
+      } else if (escalateMatch) {
+        const target = escalateMatch[1];
+        response = await this.handleTransfer(message, target, 'escalate', "stateless");
+      }
+      return response;
+    }
+    // Stateful mode (default if conversationId is provided)
     const state = this.getOrCreateState(conversationId);
-    const finalSystem = interpolatePrompt(this.systemprompt, variables);
-    const userPrompt = interpolatePrompt(message, variables);
-
+    const finalSystem = interpolatePrompt(this.systemprompt, variables || {});
+    const userPrompt = interpolatePrompt(message, variables || {});
     // --- Ensure system prompt is always up-to-date in history ---
     if (this.systemprompt) {
       if (state.history.length > 0 && state.history[0].role === "system") {
@@ -195,15 +234,12 @@ export class LLMBase {
       }
     }
     // --- End system prompt update logic ---
-
     state.history.push({ role: "user", content: userPrompt });
     // No prune here
-
     // Get initial response from this LLM (this is where tool calling happens)
     let response = await this._invoke(userPrompt, conversationId);
     state.history.push({ role: "assistant", content: response });
     await this.pruneHistoryIfNeeded(state); // Only after assistant
-
     // Record initial conversation flow entry
     const initialFlowEntry: ConversationFlowEntry = {
       llmName: this.name,
@@ -212,11 +248,9 @@ export class LLMBase {
       timestamp: new Date()
     };
     state.conversation_flow.push(initialFlowEntry);
-
     // Check for transfer patterns
     const transferMatch = response.match(/\[TRANSFER:(\w+)\]/);
     const escalateMatch = response.match(/\[ESCALATE:(\w+)\]/);
-
     if (transferMatch) {
       const target = transferMatch[1];
       response = await this.handleTransfer(message, target, 'transfer', conversationId);
@@ -224,7 +258,6 @@ export class LLMBase {
       const target = escalateMatch[1];
       response = await this.handleTransfer(message, target, 'escalate', conversationId);
     }
-
     return response;
   }
 
