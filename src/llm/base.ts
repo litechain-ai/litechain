@@ -427,6 +427,20 @@ export class LLMBase {
   }
 
   /**
+   * Set the conversation state for a given conversationId
+   */
+  setState(conversationId: string, state: EnhancedLLMState): void {
+    this.conversationStates[conversationId] = state;
+  }
+
+  /**
+   * Get the conversation state for a given conversationId
+   */
+  getState(conversationId: string = "default"): EnhancedLLMState {
+    return this.getOrCreateState(conversationId);
+  }
+
+  /**
    * Record token usage for budget tracking
    */
   protected recordTokenUsage(tokenUsage: TokenUsage): void {
