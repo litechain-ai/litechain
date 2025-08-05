@@ -84,7 +84,7 @@ class GroqClient extends LLMBase {
         return finalResponse;
     }
 
-    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
+    protected async _invokeStream(prompt: string, options?: { onFunctionCall?: (functionCall: { name: string; args: Record<string, any> }) => void; onFunctionCallFinish?: (functionCall: { name: string; args: Record<string, any>; response: string }) => void }, conversationId: string = "default"): Promise<AsyncIterableIterator<StreamChunk>> {
         const state = this.getOrCreateState(conversationId);
         let currentHistory = [...state.history];
         // Ensure currentHistory is never empty
@@ -294,6 +294,15 @@ After the tool call, continue with your response based on the tool result.`;
                             
                             try {
                                 const toolResponse = await tool.execute(toolCall.args || {});
+                                
+                                // Invoke onFunctionCallFinish callback if provided
+                                if (options?.onFunctionCallFinish) {
+                                    options.onFunctionCallFinish({
+                                        name: toolCall.name,
+                                        args: toolCall.args,
+                                        response: toolResponse
+                                    });
+                                }
                                 
                                 // Yield tool result chunk
                                 yield {

@@ -438,7 +438,9 @@ await llm.run("Generate content", {
   stream: true,
   onChunk: (chunk: StreamChunk) => void,
   onComplete: (content: string) => void,
-  onError: (error: Error) => void
+  onError: (error: Error) => void,
+  onFunctionCall: (functionCall: { name: string; args: Record<string, any> }) => void,
+  onFunctionCallFinish: (functionCall: { name: string; args: Record<string, any>; response: string }) => void
 });
 ```
 
@@ -469,6 +471,48 @@ llm.connect({
   SUPPORT: supportLLM,
   BILLING: billingLLM,
   HUMAN: async (msg) => "Human response"
+});
+```
+
+### Function Call Callbacks
+
+Litechain provides two callbacks to track function/tool execution:
+
+#### `onFunctionCall`
+Triggered when a function is about to be called (before execution).
+
+```ts
+await llm.run("What's the weather in NYC?", {
+  onFunctionCall: (functionCall) => {
+    console.log(`Function called: ${functionCall.name}`);
+    console.log(`Arguments: ${JSON.stringify(functionCall.args)}`);
+  }
+});
+```
+
+#### `onFunctionCallFinish`
+Triggered when a function has completed execution (after getting the response).
+
+```ts
+await llm.run("Calculate 15 * 23", {
+  onFunctionCallFinish: (functionCall) => {
+    console.log(`Function completed: ${functionCall.name}`);
+    console.log(`Response: ${functionCall.response}`);
+  }
+});
+```
+
+You can use both callbacks together for complete function call tracking:
+
+```ts
+await llm.run("Get weather and calculate something", {
+  onFunctionCall: (functionCall) => {
+    console.log(`📞 Starting: ${functionCall.name}`);
+  },
+  onFunctionCallFinish: (functionCall) => {
+    console.log(`✅ Completed: ${functionCall.name}`);
+    console.log(`📤 Result: ${functionCall.response}`);
+  }
 });
 ```
 
